@@ -574,7 +574,7 @@ export class ProcessorEngine {
           const wfStep = step as any;
           const workflowId = wfStep.workflow_id;
           if (!workflowId) throw new Error("call_workflow step missing workflow_id");
-          if (!this.client?.workflows?.run) throw new Error("Client required for callWorkflow. Configure apiKey, apiSecret, baseUrl.");
+          if (!this.client?.workflows?.run) throw new Error("Client required for callWorkflow. Configure apiKey and apiSecret.");
           let payload = wfStep.payload || {};
           if (typeof payload === "object") {
             payload = JSON.parse(await renderTemplate(JSON.stringify(payload), state));
