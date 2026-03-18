@@ -1,0 +1,49 @@
+{
+  "name": "@cliodot/flosync",
+  "version": "0.1.0",
+  "description": "SDK for building workflows, APIs, and functions with Cliodot Flowsync",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "flowsync",
+    "cliodot",
+    "workflow",
+    "api",
+    "sdk"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.8.4",
+    "dayjs": "^1.11.13",
+    "jexl": "^2.3.0"
+  },
+  "peerDependencies": {
+    "mongodb": "^7.0.0",
+    "mysql2": "^3.15.3",
+    "pg": "^8.13.0",
+    "ioredis": "^5.6.0"
+  },
+  "peerDependenciesMeta": {
+    "mongodb": { "optional": true },
+    "mysql2": { "optional": true },
+    "pg": { "optional": true },
+    "ioredis": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/jexl": "^2.3.4",
+    "@types/node": "^22.10.2",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

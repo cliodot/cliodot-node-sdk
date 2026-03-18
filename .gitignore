@@ -1,0 +1,14 @@
+/node_modules
+.vscode
+/dist
+.env
+yarn-error.log
+yarn.lock
+.qodo
+
+webpack.config.js
+package-lock.json
+.yarn-cache
+*.html
+
+
