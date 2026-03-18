@@ -97,7 +97,7 @@ export class Flosync {
 
   async runById(workflowId: string, payload: any = {}, options?: { triggerId?: string }): Promise<any> {
     const client = this.getClient();
-    if (!client) throw new Error("FlosyncClient not configured. Set apiKey, apiSecret, and baseUrl for remote run.");
+    if (!client) throw new Error("FlosyncClient not configured. Set apiKey and apiSecret for remote run.");
     const triggerId = options?.triggerId ?? "trigger";
     const normalized = this.normalizeRunPayload(payload);
     return client.workflows.run(workflowId, triggerId, { payload: normalized });
@@ -105,13 +105,13 @@ export class Flosync {
 
   async runByWebhook(webhookPath: string, method: string, payload: any = {}): Promise<any> {
     const client = this.getClient();
-    if (!client) throw new Error("FlosyncClient not configured. Set apiKey, apiSecret, and baseUrl for remote run.");
+    if (!client) throw new Error("FlosyncClient not configured. Set apiKey and apiSecret for remote run.");
     return client.workflows.runByWebhook(webhookPath, method, payload);
   }
 
   async runFunctionById(functionId: string, args: Record<string, any> = {}): Promise<any> {
     const client = this.getClient();
-    if (!client) throw new Error("FlosyncClient not configured. Set apiKey, apiSecret, and baseUrl for remote invoke.");
+    if (!client) throw new Error("FlosyncClient not configured. Set apiKey and apiSecret for remote invoke.");
     return client.functions.invoke(functionId, args);
   }
 
@@ -162,7 +162,7 @@ export class Flosync {
       return client.connectors.execute(connectorId, action, options);
     }
     throw new Error(
-      `Connector ${connectorId} not found locally. Configure apiKey, apiSecret, and baseUrl to run connectors from your Cliodot account.`
+      `Connector ${connectorId} not found locally. Configure apiKey and apiSecret to run connectors from your Cliodot account.`
     );
   }
 
@@ -213,13 +213,13 @@ export class Flosync {
 
   async push(workflow: IWorkflow): Promise<any> {
     const client = this.getClient();
-    if (!client) throw new Error("FlosyncClient not configured. Set apiKey, apiSecret, and baseUrl in configure().");
+    if (!client) throw new Error("FlosyncClient not configured. Set apiKey and apiSecret in configure().");
     return client.workflows.push(workflow);
   }
 
   async pull(workflowId: string): Promise<IWorkflow> {
     const client = this.getClient();
-    if (!client) throw new Error("FlosyncClient not configured. Set apiKey, apiSecret, and baseUrl in configure().");
+    if (!client) throw new Error("FlosyncClient not configured. Set apiKey and apiSecret in configure().");
     const wf = await client.workflows.pull(workflowId);
     this.register(wf);
     return wf;

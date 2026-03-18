@@ -5,7 +5,7 @@ import { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 import type { ConnectorsApi, WorkflowsApi, FunctionsApi, ProjectsApi } from "./types/client.api";
 import { CliodotApiError } from "./errors";
 
-export const DEFAULT_CLIODOT_BASE_URL = "http://localhost:8080";
+export const DEFAULT_CLIODOT_BASE_URL = "https://sdk.flowfly.dev";
 
 function toFinalWorkflowResult(data: any): any {
 
@@ -64,12 +64,12 @@ export class FlosyncClient {
     return this.jwt!;
   }
 
-  private async request(method: string, path: string, body?: any, params?: any): Promise<any> {
+  private async request(method: string, path: string, body?: any, params?: any, headers?: Record<string, string>): Promise<any> {
     const token = await this.ensureAuth();
     const cfg: any = {
       method,
       url: path,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...headers },
     };
     if (body) cfg.data = body;
     if (params) cfg.params = params;
@@ -165,19 +165,26 @@ export class FlosyncClient {
         vars?: Record<string, any>;
       }
     ): Promise<any> => {
-      const payload: Record<string, any> = {
-        body: options?.body,
-        params: options?.params,
-        pathParams: options?.pathParams,
-        headers: options?.headers,
+      const requestBody: Record<string, any> = {
+        ...options?.body,
+        // pathParams: options?.pathParams,
         installation_id: options?.installation_id,
         database: options?.database,
         connection_id: options?.connection_id,
-        timeout: options?.timeout,
-        vars: options?.vars,
+        // timeout: options?.timeout,
+        // vars: options?.vars,
       };
-      const filtered = Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== undefined));
-      const data = await this.request("POST", `/connectors/${connectorId}/actions/${encodeURIComponent(action)}`, filtered);
+      const filteredBody = Object.fromEntries(Object.entries(requestBody).filter(([, v]) => v !== undefined));
+      const queryParams = options?.params;
+      // console.log("HERE WE GO", filteredBody)
+      const headers = options?.headers;
+      const data = await this.request(
+        "POST",
+        `/connectors/${connectorId}/actions/${encodeURIComponent(action)}`,
+        Object.keys(filteredBody).length ? filteredBody : undefined,
+        queryParams,
+        headers
+      );
       if (data?.ok === false) throw new Error(data?.error ?? "Connector execution failed");
       return data?.data ?? data;
     },
