@@ -1,6 +1,6 @@
 {
   "name": "cliodot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "SDK for building workflows, APIs, and functions with Cliodot Flowsync",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
