@@ -245,7 +245,7 @@ export class FlosyncClient {
       const data = await this.request("POST", "/workflows/test/webhook", {
         webhookPath,
         webhookMethod: method,
-        payload: { trigger: { data: body ?? rest } },
+        payload: { ...(body ?? {}), ...rest },
         ...(environment && { environment }),
       });
       return toFinalWorkflowResult(data);
