@@ -1,11 +1,35 @@
-# @cliodot/flosync
+# cliodot
 
 SDK for building workflows, APIs, and functions with Cliodot Flowsync. Define workflows and functions in code, run them locally, and optionally sync with your Flowsync account.
 
 ## Installation
 
 ```bash
-npm install @cliodot/flosync
+npm install cliodot
+```
+
+### Module Support
+
+Cliodot supports both **ES Modules** (recommended for Node.js 16+, TypeScript, and modern frameworks) and **CommonJS**.
+
+**ES Modules (ESM) / TypeScript**
+```javascript
+import { flosync, v } from 'cliodot';
+// or: import { flosync, variable as v } from 'cliodot';
+```
+
+**CommonJS (CJS)**
+```javascript
+const { flosync, v } = require('cliodot');
+// or: const { flosync, variable: v } = require('cliodot');
+```
+
+**Note for some ESM environments:**
+If you encounter `SyntaxError: Named export 'flosync' not found`, use the default import instead:
+
+```javascript
+import pkg from 'cliodot';
+const { flosync, v } = pkg;
 ```
 
 Optional peer dependencies:
@@ -29,7 +53,7 @@ npm install argon2 bcrypt
 ## Quick Start
 
 ```javascript
-const { flosync, variable: v } = require('@cliodot/flosync');
+import { flosync, v } from 'cliodot';
 
 flosync.configure({
   connectors: {
@@ -73,7 +97,7 @@ flosync.run('my-workflow', { body: { id: 1 }, headers: { 'x-request-id': 'abc' }
 flosync.configure({
   apiKey: process.env.FLOSYNC_API_KEY,
   apiSecret: process.env.FLOSYNC_API_SECRET,
-  baseUrl: 'http://localhost:8080',
+  baseUrl: 'http://localhost:8080' //optional,
   projectId: process.env.FLOSYNC_PROJECT_ID,
   connectors: {
     'mongodb.system': { uri: process.env.MONGO_URI, database: 'myapp' },
@@ -126,7 +150,7 @@ Use `variable` (or `v`) instead of typing `{{ }}`:
 | `v.expr(expression)` | `v.expr('length(body.items) * 10')` | `{{ length(body.items) * 10 }}` |
 
 ```javascript
-const { flosync, variable: v } = require('@cliodot/flosync');
+import { flosync, v } from 'cliodot';
 
 s.validator({ amount: v.body('amount'), email: v.body('email') });
 s.transform({ total: v.stepResult('calculate', 'total'), id: v.stepResult('charge', 'id') });
@@ -226,7 +250,7 @@ Use `s.util(connectorId, action, config)` with built-in utility connectors. Use 
 | `utility.geo` | calculate_distance, point_in_polygon, get_bounding_box, reverse_geocode, geocode, convert_coordinates |
 
 ```javascript
-const { ConnectorId, ConnectorActions, getConnectorActions } = require('@cliodot/flosync');
+import { ConnectorId, ConnectorActions, getConnectorActions } from 'cliodot';
 
 s.util(ConnectorId.Utility.String, 'slugify', { string: 'Hello World' });
 s.util(ConnectorId.Utility.Math, 'clamp', { number: 150, min: 0, max: 100 });
@@ -288,7 +312,7 @@ Use `ConnectorId` and `ConnectorActions` for built-in connectors, or `defineCust
 ### Built-in connectors
 
 ```javascript
-const { flosync, ConnectorId, ConnectorActions, getConnectorActions, listBuiltInConnectors } = require('@cliodot/flosync');
+import { flosync, ConnectorId, ConnectorActions, getConnectorActions, listBuiltInConnectors } from 'cliodot';
 
 // Database
 s.db('mongodb', 'insertOne', { collection: 'orders', document: {} });
@@ -319,7 +343,7 @@ console.log(listBuiltInConnectors());
 Define your connector with typed actions for autocomplete:
 
 ```javascript
-const { defineCustomConnector } = require('@cliodot/flosync');
+import { defineCustomConnector } from 'cliodot';
 
 const MyStore = defineCustomConnector('my.store', {
   login: 'login',
@@ -336,7 +360,7 @@ s.connector(MyStore.id, MyStore.actions.listItems, {});
 For a simple list of action names:
 
 ```javascript
-const { defineCustomConnectorFromList } = require('@cliodot/flosync');
+import { defineCustomConnectorFromList } from 'cliodot';
 
 const MyStore = defineCustomConnectorFromList('my.store', ['login', 'listItems', 'createItem']);
 ```
@@ -445,7 +469,7 @@ flosync.registerConnector('my.auth', {
 });
 ```
 
-Import types for TypeScript: `ConnectorExecuteOptions`, `ConnectorContext`, `ConnectorExecuteFn` from `@cliodot/flosync`.
+Import types for TypeScript: `ConnectorExecuteOptions`, `ConnectorContext`, `ConnectorExecuteFn` from `cliodot`.
 
 **Execute signature**
 
