@@ -5,6 +5,7 @@ import { FunctionBuilder } from "./FunctionBuilder";
 import { ProcessorEngine } from "./runner/ProcessorEngine";
 import { createCliodotConnector } from "./connectors/builtin";
 import { FlosyncClient } from "./FlosyncClient";
+import { buildWorkflowFromClass } from "./decorators/build";
 
 export interface FlosyncConfig {
   apiKey?: string;
@@ -14,6 +15,8 @@ export interface FlosyncConfig {
   tenantId?: string;
   connectors?: Record<string, any>;
   cliodot?: { baseUrl: string; apiKey: string };
+  tokenRefreshMarginMs?: number;
+  tokenFallbackReuseMs?: number;
 }
 
 export class Flosync {
@@ -34,9 +37,11 @@ export class Flosync {
       const existing = (this as any).client;
       if (!existing) {
         (this as any).client = new FlosyncClient({
-          baseUrl: config.baseUrl,
-          apiKey: config.apiKey,
-          apiSecret: config.apiSecret,
+          baseUrl: this.config.baseUrl,
+          apiKey: this.config.apiKey!,
+          apiSecret: this.config.apiSecret!,
+          tokenRefreshMarginMs: this.config.tokenRefreshMarginMs,
+          tokenFallbackReuseMs: this.config.tokenFallbackReuseMs,
         });
       }
     }
@@ -76,8 +81,15 @@ export class Flosync {
     for (const w of list) {
       this.workflows.set(w._id, w);
       this.workflowsByName.set(w.name, w);
+      const rawId = (w as any).__rawId;
+      if (rawId && rawId !== w._id) this.workflows.set(rawId, w);
     }
     return this;
+  }
+
+  registerFromClass(workflowClass: any): this {
+    const workflow = buildWorkflowFromClass(workflowClass);
+    return this.register(workflow);
   }
 
   async run(workflowIdOrName: string, payload: any = {}, options?: { remote?: boolean }): Promise<any> {

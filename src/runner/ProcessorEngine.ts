@@ -24,6 +24,13 @@ async function renderBodyRecursive(val: any, ctx: Record<string, any>): Promise<
         return rendered;
       }
     }
+    if (typeof rendered === "string" && rendered.startsWith("[") && rendered.endsWith("]")) {
+      try {
+        return JSON.parse(rendered);
+      } catch {
+        return rendered;
+      }
+    }
     return rendered;
   }
   if (Array.isArray(val)) {
@@ -439,6 +446,46 @@ export class ProcessorEngine {
           continue;
         }
 
+        if (step.type === WorkflowStepType.CODE) {
+          const codeStep = step as any;
+          const input =
+            codeStep.input_from
+              ? state.stepResults[codeStep.input_from]?.result ??
+                state.stepResults[codeStep.input_from]?.output ??
+                state.stepResults[codeStep.input_from] ??
+                {}
+              : state.trigger?.data ?? state.trigger ?? {};
+
+          const ctxForCode = {
+            input,
+            trigger: state.trigger,
+            steps: state.stepResults,
+            vars: state.vars,
+          };
+
+          let result: any = null;
+          if (codeStep.source) {
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", codeStep.source);
+            result = await userFn(ctxForCode, {});
+          } else if (codeStep.module_ref) {
+            throw new Error("module_ref is not supported in local code steps");
+          } else {
+            throw new Error("code step must have either source or module_ref");
+          }
+
+          if (result && typeof result === "object" && result.setVars && typeof result.setVars === "object") {
+            for (const k of Object.keys(result.setVars)) {
+              state.vars[k] = result.setVars[k];
+            }
+          }
+
+          state.stepResults[step.id] = { result: result?.out ?? result };
+          const nextIdx = findNextStepIndex(step);
+          currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
+          continue;
+        }
+
         if (step.type === WorkflowStepType.API_CALL) {
           const apiStep = step as any;
           const connector = await this.getConnectorOrFetch(apiStep.connector_id);
@@ -462,6 +509,28 @@ export class ProcessorEngine {
           if (resp?.terminate) return resp;
           const normalResp = resp as { mapped?: any; raw?: any };
           state.stepResults[step.id] = normalResp?.mapped ?? normalResp?.raw ?? null;
+
+          if (typeof (step as any).post_source === "string" && (step as any).post_source.trim().length > 0) {
+            const postFnSource = (step as any).post_source as string;
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", postFnSource);
+            const postCtx = {
+              input: state.stepResults[step.id],
+              trigger: state.trigger,
+              steps: state.stepResults,
+              vars: state.vars,
+            };
+            const postRes = await userFn(postCtx, {});
+            if (postRes && typeof postRes === "object" && postRes.setVars && typeof postRes.setVars === "object") {
+              for (const k of Object.keys(postRes.setVars)) state.vars[k] = postRes.setVars[k];
+            }
+            if (postRes && typeof postRes === "object" && Object.prototype.hasOwnProperty.call(postRes, "out")) {
+              state.stepResults[step.id] = postRes.out;
+            } else if (postRes !== undefined && typeof postRes !== "object") {
+              state.stepResults[step.id] = postRes;
+            }
+          }
+
           if (isResultFailure(state.stepResults[step.id])) {
             if (checkAndJumpToErrorBranch(step)) continue;
             const nextIdx = findNextStepIndex(step);
@@ -485,7 +554,29 @@ export class ProcessorEngine {
           if (resp?.terminate) return resp;
           const authResult = resp as any;
           state.stepResults[step.id] = authResult?.mapped ?? authResult ?? resp;
-          if (authResult?.valid === false || authResult?.ok === false) {
+
+          if (typeof (step as any).post_source === "string" && (step as any).post_source.trim().length > 0) {
+            const postFnSource = (step as any).post_source as string;
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", postFnSource);
+            const postCtx = {
+              input: state.stepResults[step.id],
+              trigger: state.trigger,
+              steps: state.stepResults,
+              vars: state.vars,
+            };
+            const postRes = await userFn(postCtx, {});
+            if (postRes && typeof postRes === "object" && postRes.setVars && typeof postRes.setVars === "object") {
+              for (const k of Object.keys(postRes.setVars)) state.vars[k] = postRes.setVars[k];
+            }
+            if (postRes && typeof postRes === "object" && Object.prototype.hasOwnProperty.call(postRes, "out")) {
+              state.stepResults[step.id] = postRes.out;
+            } else if (postRes !== undefined && typeof postRes !== "object") {
+              state.stepResults[step.id] = postRes;
+            }
+          }
+
+          if (isResultFailure(state.stepResults[step.id])) {
             if (checkAndJumpToErrorBranch(step)) continue;
             const nextIdx = findNextStepIndex(step);
             currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
@@ -508,6 +599,28 @@ export class ProcessorEngine {
           if (resp?.terminate) return resp;
           const normalResp = resp as { mapped?: any; raw?: any };
           state.stepResults[step.id] = normalResp?.mapped ?? normalResp?.raw ?? null;
+
+          if (typeof (step as any).post_source === "string" && (step as any).post_source.trim().length > 0) {
+            const postFnSource = (step as any).post_source as string;
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", postFnSource);
+            const postCtx = {
+              input: state.stepResults[step.id],
+              trigger: state.trigger,
+              steps: state.stepResults,
+              vars: state.vars,
+            };
+            const postRes = await userFn(postCtx, {});
+            if (postRes && typeof postRes === "object" && postRes.setVars && typeof postRes.setVars === "object") {
+              for (const k of Object.keys(postRes.setVars)) state.vars[k] = postRes.setVars[k];
+            }
+            if (postRes && typeof postRes === "object" && Object.prototype.hasOwnProperty.call(postRes, "out")) {
+              state.stepResults[step.id] = postRes.out;
+            } else if (postRes !== undefined && typeof postRes !== "object") {
+              state.stepResults[step.id] = postRes;
+            }
+          }
+
           if (checkAndJumpToSuccessBranch(step)) continue;
           const nextIdx = findNextStepIndex(step);
           currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
@@ -528,6 +641,28 @@ export class ProcessorEngine {
           if (resp?.terminate) return resp;
           const normalResp = resp as { mapped?: any; raw?: any };
           state.stepResults[step.id] = normalResp?.mapped ?? normalResp?.raw ?? null;
+
+          if (typeof (step as any).post_source === "string" && (step as any).post_source.trim().length > 0) {
+            const postFnSource = (step as any).post_source as string;
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", postFnSource);
+            const postCtx = {
+              input: state.stepResults[step.id],
+              trigger: state.trigger,
+              steps: state.stepResults,
+              vars: state.vars,
+            };
+            const postRes = await userFn(postCtx, {});
+            if (postRes && typeof postRes === "object" && postRes.setVars && typeof postRes.setVars === "object") {
+              for (const k of Object.keys(postRes.setVars)) state.vars[k] = postRes.setVars[k];
+            }
+            if (postRes && typeof postRes === "object" && Object.prototype.hasOwnProperty.call(postRes, "out")) {
+              state.stepResults[step.id] = postRes.out;
+            } else if (postRes !== undefined && typeof postRes !== "object") {
+              state.stepResults[step.id] = postRes;
+            }
+          }
+
           if (checkAndJumpToSuccessBranch(step)) continue;
           const nextIdx = findNextStepIndex(step);
           currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
@@ -558,12 +693,35 @@ export class ProcessorEngine {
             throw new Error("Function not found: " + fnId);
           }
           state.stepResults[step.id] = fnResult.ok ? (fnResult.data ?? fnResult.stepResults ?? {}) : { error: fnResult.error, ok: false };
-          if (!fnResult.ok) {
+
+          if (typeof (step as any).post_source === "string" && (step as any).post_source.trim().length > 0) {
+            const postFnSource = (step as any).post_source as string;
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", postFnSource);
+            const postCtx = {
+              input: state.stepResults[step.id],
+              trigger: state.trigger,
+              steps: state.stepResults,
+              vars: state.vars,
+            };
+            const postRes = await userFn(postCtx, {});
+            if (postRes && typeof postRes === "object" && postRes.setVars && typeof postRes.setVars === "object") {
+              for (const k of Object.keys(postRes.setVars)) state.vars[k] = postRes.setVars[k];
+            }
+            if (postRes && typeof postRes === "object" && Object.prototype.hasOwnProperty.call(postRes, "out")) {
+              state.stepResults[step.id] = postRes.out;
+            } else if (postRes !== undefined && typeof postRes !== "object") {
+              state.stepResults[step.id] = postRes;
+            }
+          }
+
+          if (isResultFailure(state.stepResults[step.id])) {
             if (checkAndJumpToErrorBranch(step)) continue;
             const nextIdx = findNextStepIndex(step);
             currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
             continue;
           }
+
           if (checkAndJumpToSuccessBranch(step)) continue;
           const nextIdx = findNextStepIndex(step);
           currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
@@ -582,6 +740,35 @@ export class ProcessorEngine {
           const result = await this.client.workflows.run(workflowId, "trigger", { payload });
           const body = result?.body ?? result?.data ?? result;
           state.stepResults[step.id] = body;
+
+          if (typeof (step as any).post_source === "string" && (step as any).post_source.trim().length > 0) {
+            const postFnSource = (step as any).post_source as string;
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", postFnSource);
+            const postCtx = {
+              input: state.stepResults[step.id],
+              trigger: state.trigger,
+              steps: state.stepResults,
+              vars: state.vars,
+            };
+            const postRes = await userFn(postCtx, {});
+            if (postRes && typeof postRes === "object" && postRes.setVars && typeof postRes.setVars === "object") {
+              for (const k of Object.keys(postRes.setVars)) state.vars[k] = postRes.setVars[k];
+            }
+            if (postRes && typeof postRes === "object" && Object.prototype.hasOwnProperty.call(postRes, "out")) {
+              state.stepResults[step.id] = postRes.out;
+            } else if (postRes !== undefined && typeof postRes !== "object") {
+              state.stepResults[step.id] = postRes;
+            }
+          }
+
+          if (isResultFailure(state.stepResults[step.id])) {
+            if (checkAndJumpToErrorBranch(step)) continue;
+            const nextIdx = findNextStepIndex(step);
+            currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
+            continue;
+          }
+
           if (checkAndJumpToSuccessBranch(step)) continue;
           const nextIdx = findNextStepIndex(step);
           currentStepIndex = nextIdx >= 0 ? nextIdx : -1;

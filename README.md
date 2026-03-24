@@ -184,6 +184,426 @@ Steps that can succeed or fail support `.then()` and `.else()`:
   .else('invalid'))
 ```
 
+### Decorator Workflows
+
+You can define workflows using TypeScript decorators instead of the fluent `.workflow().step()` builder.
+
+1. Enable decorators in your consuming project's `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "experimentalDecorators": true
+  }
+}
+```
+
+2. Define a workflow class and decorate it with `@Workflow()` and `@Http()` (or `@Job()` / `@Schedule()`).
+
+3. Decorate class methods to create steps. By default, the step ID is the method name.
+
+4. Build and register the workflow with `buildWorkflowFromClass()` or `flosync.registerFromClass()`.
+
+5. Optional: add JavaScript inside the decorated method body.
+
+If a decorated method contains non-empty code, the SDK uses it based on the step decorator option `stage`:
+
+- `stage: "pre"` (default): injects an extra `code` step right before the decorated step. The injected code receives `ctx` with:
+
+- `ctx.input` (previous step output, or trigger data for the first step)
+- `ctx.trigger` (trigger payload)
+- `ctx.steps` (all previous `stepResults`)
+- `ctx.vars` (workflow vars, including anything set via `setVars`)
+
+To pass values to later steps, return an object with `setVars`:
+
+```typescript
+return { setVars: { limit: 10 } };
+```
+
+Later templates can read them via `v.vars("limit")` (resolves to `{{ vars["limit"] }}`) or `{{ vars.limit }}`.
+
+- `stage: "post"`: executes the method body after the decorated step finishes, and allows overriding the decorated step output directly.
+
+In this mode, return:
+
+```typescript
+return { out: <newOutput>, setVars?: { ... } };
+```
+
+The overridden output becomes the value of `v.stepResult("<stepId>")` for subsequent steps.
+
+In `stage: "post"`, `ctx.input` is the decorated step output produced by the connector/function call.
+
+Example: list todos using decorators
+
+```typescript
+import { flosync, v, Workflow, Http, Connector, Condition, Responder, buildWorkflowFromClass, defineCustomConnector } from "cliodot";
+
+const CarrierStore = defineCustomConnector("carrier.store", {
+  listTodos: "listTodos",
+});
+
+@Workflow("todos-list-decorators", "Todos List (Decorators)")
+@Http("GET", "/todos")
+class TodosListDecoratorsWorkflow {
+  @Connector(
+    CarrierStore.id,
+    CarrierStore.actions.listTodos,
+    { params: { limit: 10 } },
+    { order: 0, stage: "post" }
+  )
+  list(ctx: any) {
+    const todos = Array.isArray(ctx?.input?.todos) ? ctx.input.todos : [];
+    const formatted = todos.map((t: any) => {
+      const title = String(t?.title ?? "").trim();
+      return { ...t, title, title_upper: title.toUpperCase() };
+    });
+    return { out: { ...(ctx?.input ?? {}), todos: formatted } };
+  }
+
+  @Condition(v.stepResult("list", "valid"), { then: "ok", else: "unauth", order: 1 })
+  check() {}
+
+  @Responder("json", { body: { todos: v.stepResult("list", "todos") } }, { order: 2 })
+  ok() {}
+
+  @Responder("json", { statusCode: 401, body: { error: "Unauthorized" } }, { order: 3 })
+  unauth() {}
+}
+
+const workflow = buildWorkflowFromClass(TodosListDecoratorsWorkflow);
+flosync.register(workflow);
+```
+
+If you prefer direct registration:
+
+```typescript
+flosync.registerFromClass(TodosListDecoratorsWorkflow);
+```
+
+### Decorator workflow: validation, MongoDB, string utilities, shaped JSON
+
+This pattern matches what many APIs do: validate input, derive a slug with `utility.string`, write to MongoDB, return a single JSON object with nested `note` metadata (not a flat dump of raw step outputs).
+
+Configure the database once:
+
+```javascript
+flosync.configure({
+  connectors: {
+    "mongodb.system": { uri: process.env.MONGO_URI, database: "myapp" },
+  },
+});
+```
+
+Workflow (imports: `flosync`, `v`, `Workflow`, `Http`, `Validator`, `Util`, `Db`, `Responder`, `buildWorkflowFromClass`, `ConnectorId`):
+
+```typescript
+import {
+  flosync,
+  v,
+  Workflow,
+  Http,
+  Validator,
+  Util,
+  Db,
+  Responder,
+  buildWorkflowFromClass,
+  ConnectorId,
+} from "cliodot";
+
+@Workflow("notes-create-decorators", "Notes create (decorators)")
+@Http("POST", "/decorators/notes")
+class NotesCreateDecoratorsWorkflow {
+  @Validator(
+    { title: v.body("title"), body: v.body("body") },
+    { order: 0, then: "slugify", else: "validationError" }
+  )
+  validate() {}
+
+  @Util(
+    ConnectorId.Utility.String,
+    "slugify",
+    { string: v.body("title") },
+    { order: 1 }
+  )
+  slugify() {}
+
+  @Db(
+    "mongodb",
+    "insertOne",
+    {
+      collection: "notes",
+      document: {
+        title: v.body("title"),
+        body: v.body("body"),
+        slug: v.stepResult("slugify", "value"),
+      },
+    },
+    { order: 2 }
+  )
+  persist() {}
+
+  @Responder(
+    "json",
+    {
+      statusCode: 201,
+      body: {
+        ok: true,
+        note: {
+          id: v.stepResult("persist", "insertedId"),
+          title: v.body("title"),
+          slug: v.stepResult("slugify", "value"),
+          body: v.body("body"),
+        },
+      },
+    },
+    { order: 3 }
+  )
+  created() {}
+
+  @Responder(
+    "json",
+    {
+      statusCode: 400,
+      body: {
+        ok: false,
+        error: "validation_failed",
+        details: v.stepResult("validate", "errors"),
+      },
+    },
+    { order: 4 }
+  )
+  validationError() {}
+}
+
+const notesDecoratorsWorkflow = buildWorkflowFromClass(NotesCreateDecoratorsWorkflow);
+flosync.register(notesDecoratorsWorkflow);
+```
+
+Example request:
+
+```http
+POST /decorators/notes
+Content-Type: application/json
+
+{
+  "title": "Ship checklist",
+  "body": "Pack boxes, print labels, hand off to carrier."
+}
+```
+
+Example success response body:
+
+```json
+{
+  "ok": true,
+  "note": {
+    "id": "65a1b2c3d4e5f6789012345",
+    "title": "Ship checklist",
+    "slug": "ship-checklist",
+    "body": "Pack boxes, print labels, hand off to carrier."
+  }
+}
+```
+
+Example validation failure response body:
+
+```json
+{
+  "ok": false,
+  "error": "validation_failed",
+  "details": {
+    "title": "Field is required"
+  }
+}
+```
+
+`@Util` is typed the same way as `s.util(ConnectorId.Utility.String, "slugify", { ... })` in the fluent builder. `@Db` supports the `mongodb` and `mysql` engines (see [Database](#database)). Step IDs in `v.stepResult("slugify", "value")` refer to the **method name** you put on each decorated step (after sanitization, dots and hyphens in custom IDs become underscores).
+
+### Custom `execute` connector plus decorators (catalog sample)
+
+For behavior that is not a REST template (in-memory demo data, your own SDK, legacy SOAP adapter, etc.), register a connector with an `execute` function, then call it from decorators with `@Connector` exactly like a built-in connector. This mirrors the `carrier.store` pattern: actions such as `listProducts` and `createProduct`, `options.body` / `options.params` / `options.pathParams` passed from the step config.
+
+Define typed action names and the connector:
+
+```typescript
+import { flosync, defineCustomConnector } from "cliodot";
+
+type CatalogProduct = { id: string; name: string; price: number };
+
+const Catalog = defineCustomConnector("acme.catalog", {
+  listProducts: "listProducts",
+  createProduct: "createProduct",
+});
+
+const catalogProducts: CatalogProduct[] = [
+  { id: "p_static_1", name: "Starter", price: 0 },
+  { id: "p_static_2", name: "Pro", price: 49 },
+];
+
+flosync.registerConnector(Catalog.id, {
+  _id: Catalog.id,
+  type: "system",
+  name: "Acme Catalog",
+  meta: { category: "catalog" },
+  auth: { type: "none" },
+  execute: async (action, options) => {
+    const body = (options.body ?? {}) as Record<string, unknown>;
+    const params = (options.params ?? {}) as Record<string, unknown>;
+    const pathParams = (options.pathParams ?? {}) as Record<string, unknown>;
+    const merged = { ...params, ...pathParams };
+
+    if (action === Catalog.actions.listProducts) {
+      const limitRaw = merged.limit;
+      const limit =
+        limitRaw === undefined || limitRaw === ""
+          ? catalogProducts.length
+          : Math.max(0, Number(limitRaw));
+      const slice = catalogProducts.slice(0, Number.isFinite(limit) ? limit : catalogProducts.length);
+      return { ok: true, products: slice, count: slice.length };
+    }
+
+    if (action === Catalog.actions.createProduct) {
+      const name = String(body.name ?? "").trim();
+      const price = Number(body.price);
+      if (!name || Number.isNaN(price)) {
+        return { ok: false, error: "name_and_price_required" };
+      }
+      const id = `p_${Date.now()}`;
+      const product: CatalogProduct = { id, name, price };
+      catalogProducts.push(product);
+      return { ok: true, product };
+    }
+
+    return { ok: false, error: "unknown_action" };
+  },
+});
+```
+
+List products with decorator `stage: "post"` to shape the payload (add `price_display`, clamp list) before the responder runs:
+
+```typescript
+import {
+  flosync,
+  v,
+  Workflow,
+  Http,
+  Connector,
+  Responder,
+  buildWorkflowFromClass,
+} from "cliodot";
+
+@Workflow("acme-catalog-list-decorators", "Catalog list (decorators)")
+@Http("GET", "/decorators/catalog/products")
+class CatalogListDecoratorsWorkflow {
+  @Connector(
+    Catalog.id,
+    Catalog.actions.listProducts,
+    { params: { limit: v.query("limit") } },
+    { order: 0, stage: "post" }
+  )
+  list(ctx: any) {
+    const input = ctx?.input ?? {};
+    const items = Array.isArray(input.products) ? input.products : [];
+    const withLabels = items.map((p: CatalogProduct) => ({
+      ...p,
+      price_display: `$${Number(p.price).toFixed(2)}`,
+    }));
+    return { out: { ...input, products: withLabels, count: withLabels.length } };
+  }
+
+  @Responder(
+    "json",
+    {
+      body: {
+        ok: true,
+        count: v.stepResult("list", "count"),
+        products: v.stepResult("list", "products"),
+      },
+    },
+    { order: 1 }
+  )
+  respond() {}
+}
+```
+
+Create product with the same connector; the method body flags bad input and normalizes the successful response:
+
+```typescript
+@Workflow("acme-catalog-create-decorators", "Catalog create (decorators)")
+@Http("POST", "/decorators/catalog/products")
+class CatalogCreateDecoratorsWorkflow {
+  @Connector(
+    Catalog.id,
+    Catalog.actions.createProduct,
+    { body: { name: v.body("name"), price: v.body("price") } },
+    { order: 0, stage: "post" }
+  )
+  save(ctx: any) {
+    const input = ctx?.input ?? {};
+    if (!input.ok) return { out: input };
+    const p = input.product as CatalogProduct;
+    return {
+      out: {
+        ...input,
+        product: { ...p, price_display: `$${Number(p.price).toFixed(2)}` },
+      },
+    };
+  }
+
+  @Responder(
+    "json",
+    {
+      statusCode: 201,
+      body: {
+        ok: true,
+        product: v.stepResult("save", "product"),
+      },
+    },
+    { order: 1 }
+  )
+  respond() {}
+}
+```
+
+Example `POST /decorators/catalog/products` JSON body:
+
+```json
+{
+  "name": "Enterprise",
+  "price": 199
+}
+```
+
+Example `201` response body:
+
+```json
+{
+  "ok": true,
+  "product": {
+    "id": "p_1711286400000",
+    "name": "Enterprise",
+    "price": 199,
+    "price_display": "$199.00"
+  }
+}
+```
+
+Example `GET /decorators/catalog/products?limit=1` response body:
+
+```json
+{
+  "ok": true,
+  "count": 1,
+  "products": [
+    { "id": "p_static_1", "name": "Starter", "price": 0, "price_display": "$0.00" }
+  ]
+}
+```
+
+Register both workflows with `buildWorkflowFromClass` / `flosync.register` or `flosync.registerFromClass`. Use `flosync.run("<workflow-id>", { body: { ... } })` with the `@Workflow` string ID (the engine also registers the same workflow under `__rawId` when you use kebab-case IDs).
+
 ## Functions
 
 ```javascript
