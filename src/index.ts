@@ -38,4 +38,5 @@ export type { ValidatorName, ValidatorConfig, ValidationGroupDef } from "./types
 export { FunctionBuilder } from "./FunctionBuilder";
 export { ProcessorEngine } from "./runner/ProcessorEngine";
 export type { RunState, ProcessorEngineOptions } from "./runner/ProcessorEngine";
+export * from "./decorators";
 export * from "./types";

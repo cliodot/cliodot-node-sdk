@@ -7,6 +7,36 @@ import { CliodotApiError } from "./errors";
 
 export const DEFAULT_CLIODOT_BASE_URL = "https://sdk.flowfly.dev";
 
+const DEFAULT_TOKEN_REFRESH_MARGIN_MS = 10 * 60 * 1000;
+const DEFAULT_FALLBACK_REUSE_MS = 50 * 60 * 1000;
+
+function decodeJwtExpMs(token: string): number | null {
+  try {
+    if (typeof Buffer === "undefined") return null;
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+    const payload = JSON.parse(Buffer.from(b64 + pad, "base64").toString("utf8"));
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseExpiryMsFromLoginBody(data: any, token: string): number | null {
+  const iso = data?.tokenExpiresAt ?? data?.expiresAt ?? data?.expires_at;
+  if (iso != null && typeof iso === "string") {
+    const t = Date.parse(iso);
+    if (!Number.isNaN(t)) return t;
+  }
+  const expiresIn = data?.expires_in ?? data?.expiresIn;
+  if (typeof expiresIn === "number" && Number.isFinite(expiresIn)) {
+    return Date.now() + Math.max(0, expiresIn) * 1000;
+  }
+  return decodeJwtExpMs(token);
+}
+
 function toFinalWorkflowResult(data: any): any {
 
   if (data?.result?.response) {
@@ -26,6 +56,8 @@ export interface FlosyncClientConfig {
   baseUrl?: string;
   apiKey: string;
   apiSecret: string;
+  tokenRefreshMarginMs?: number;
+  tokenFallbackReuseMs?: number;
 }
 
 export class FlosyncClient {
@@ -33,12 +65,18 @@ export class FlosyncClient {
   private apiKey: string;
   private apiSecret: string;
   private jwt: string | null = null;
+  private tokenReuseUntilMs = 0;
+  private tokenRefreshMarginMs: number;
+  private tokenFallbackReuseMs: number;
+  private loginPromise: Promise<void> | null = null;
   private axios: AxiosInstance;
 
   constructor(config: FlosyncClientConfig) {
     this.baseUrl = (config.baseUrl ?? DEFAULT_CLIODOT_BASE_URL).replace(/\/+$/, "");
     this.apiKey = config.apiKey;
     this.apiSecret = config.apiSecret;
+    this.tokenRefreshMarginMs = config.tokenRefreshMarginMs ?? DEFAULT_TOKEN_REFRESH_MARGIN_MS;
+    this.tokenFallbackReuseMs = config.tokenFallbackReuseMs ?? DEFAULT_FALLBACK_REUSE_MS;
     this.axios = axios.create({
       baseURL: `${this.baseUrl}/api-core/cliodot`,
       timeout: 30000,
@@ -46,25 +84,65 @@ export class FlosyncClient {
     });
   }
 
+  private invalidateSessionToken(): void {
+    this.jwt = null;
+    this.tokenReuseUntilMs = 0;
+  }
+
+  private setSessionFromLoginResponse(data: any): void {
+    const token = data?.token ?? data?.accessToken ?? data?.access_token;
+    if (!token || typeof token !== "string") {
+      const errMsg = data?.error || data?.message || "Login failed: no token in response";
+      throw new Error(errMsg);
+    }
+    this.jwt = token;
+    const serverExpiryMs = parseExpiryMsFromLoginBody(data, token);
+    const margin = Math.max(0, this.tokenRefreshMarginMs);
+    if (serverExpiryMs != null && serverExpiryMs > Date.now()) {
+      this.tokenReuseUntilMs = Math.max(Date.now(), serverExpiryMs - margin);
+    } else {
+      this.tokenReuseUntilMs = Date.now() + this.tokenFallbackReuseMs;
+    }
+  }
+
   async authenticate(): Promise<void> {
     const { data } = await this.axios.post("/user/login-with-api-key", {
       apiKey: this.apiKey,
       apiSecret: this.apiSecret,
     });
-    this.jwt = data?.token || data?.accessToken || data?.access_token;
-    if (!this.jwt) {
-      const errMsg = data?.error || data?.message || "Login failed: no token in response";
-      throw new Error(errMsg);
-    }
+    this.setSessionFromLoginResponse(data);
+  }
+
+  private sessionTokenIsFresh(): boolean {
+    return !!this.jwt && Date.now() < this.tokenReuseUntilMs;
   }
 
   private async ensureAuth(): Promise<string> {
-    if (this.jwt) return this.jwt;
-    await this.authenticate();
+    if (this.sessionTokenIsFresh()) return this.jwt!;
+    if (this.loginPromise) {
+      await this.loginPromise;
+      if (this.sessionTokenIsFresh()) return this.jwt!;
+    }
+
+    this.loginPromise = (async () => {
+      try {
+        await this.authenticate();
+      } finally {
+        this.loginPromise = null;
+      }
+    })();
+    await this.loginPromise;
     return this.jwt!;
   }
 
-  private async request(method: string, path: string, body?: any, params?: any, headers?: Record<string, string>): Promise<any> {
+  private async request(
+    method: string,
+    path: string,
+    body?: any,
+    params?: any,
+    headers?: Record<string, string>,
+    isRetryAfter401?: boolean
+  ): Promise<any> {
     const token = await this.ensureAuth();
     const cfg: any = {
       method,
@@ -77,10 +155,9 @@ export class FlosyncClient {
       const { data } = await this.axios(cfg);
       return data;
     } catch (err: any) {
-
-      // console.log("CLIODOT", err)
-      if (err?.response?.status === 401) {
-        this.jwt = null;
+      if (err?.response?.status === 401 && !isRetryAfter401) {
+        this.invalidateSessionToken();
+        return this.request(method, path, body, params, headers, true);
       }
       const data = err?.response?.data;
       const msg = data?.error || data?.message || err?.message || `Request failed: ${method} ${path}`;
