@@ -25,6 +25,7 @@ export enum WorkflowStepType {
   CODE = "code",
   FUNCTION = "function",
   CALL_WORKFLOW = "call_workflow",
+  CUSTOM = "custom",
 }
 
 export interface IWorkflowTrigger {
@@ -54,6 +55,13 @@ export interface IWorkflowStepApiCall extends IWorkflowStepBase {
   params?: Record<string, any>;
   pathParams?: Record<string, any>;
   body?: Record<string, any> | string | null;
+  headers?: Record<string, any> | Array<{ key: string; value: any }>;
+  timeout?: number;
+  files?: any;
+  installation_id?: string;
+  connection_id?: string;
+  database?: string;
+  vars?: Record<string, any>;
 }
 
 export interface IWorkflowStepDb extends IWorkflowStepBase {
@@ -66,15 +74,28 @@ export interface IWorkflowStepDb extends IWorkflowStepBase {
   database?: string;
 }
 
+export type ValidationRule =
+  | { name: "required" | "not_empty" | "is_empty" | "is_email" | "is_number" | "is_string" | "is_boolean" | "is_array" | "is_object" | "is_url" | "is_date" | "is_uuid" | "is_cuid" | "is_jwt" | "is_json" | "is_alphanumeric" | "is_alpha" | "is_numeric_string" | "is_hex_color" | "is_base64" | "is_credit_card" | "is_lowercase" | "is_uppercase" | "is_slug" | "is_mac_address" | "is_currency" | "is_port" | "is_latitude" | "is_longitude"; config?: { message?: string } }
+  | { name: "is_strong_password"; config?: { minLength?: number; minLowercase?: number; minUppercase?: number; minNumbers?: number; minSymbols?: number; message?: string } }
+  | { name: "is_ip"; config?: { version?: 4 | 6; message?: string } }
+  | { name: "contains" | "not_contains"; config: { search: any; caseSensitive?: boolean; message?: string } }
+  | { name: "begins_with"; config: { prefix: any; caseSensitive?: boolean; message?: string } }
+  | { name: "ends_with"; config: { suffix: any; caseSensitive?: boolean; message?: string } }
+  | { name: "is_in" | "not_in"; config: { values: any[]; caseSensitive?: boolean; message?: string } }
+  | { name: "is_phone"; config?: { pattern?: string; message?: string } }
+  | { name: "length"; config?: { min?: number; max?: number; exact?: number; message?: string } }
+  | { name: "range"; config?: { min?: number; max?: number; message?: string } }
+  | { name: "matches"; config: { pattern: string; flags?: string; message?: string } }
+  | { name: "equals" | "not_equals"; config: { value: any; message?: string } }
+  | { name: "greater_than" | "greater_than_or_equal" | "less_than" | "less_than_or_equal"; config: { value: number; message?: string } }
+  | { name: "is_address"; config?: { minLength?: number; maxLength?: number; message?: string } };
+
 export interface IWorkflowStepValidator extends IWorkflowStepBase {
   type: WorkflowStepType.VALIDATOR;
   input_from?: string;
   validationGroups: Array<{
     fields: string[];
-    validators: Array<{
-      name: string;
-      config: Record<string, any>;
-    }>;
+    validators: Array<ValidationRule>;
   }>;
 }
 
@@ -196,6 +217,13 @@ export interface IWorkflowStepAuthentication extends IWorkflowStepBase {
   body?: Record<string, any> | null;
 }
 
+export interface IWorkflowStepCustom extends IWorkflowStepBase {
+  type: WorkflowStepType.CUSTOM;
+  source?: string;
+  args?: Record<string, any>;
+  input_from?: string;
+}
+
 export type IWorkflowStep =
   | IWorkflowStepApiCall
   | IWorkflowStepDb
@@ -212,7 +240,8 @@ export type IWorkflowStep =
   | IWorkflowStepNotify
   | IWorkflowStepEncryption
   | IWorkflowStepExternalApi
-  | IWorkflowStepAuthentication;
+  | IWorkflowStepAuthentication
+  | IWorkflowStepCustom;
 
 export interface IWorkflow {
   _id: string;

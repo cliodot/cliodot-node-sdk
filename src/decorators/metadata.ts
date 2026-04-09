@@ -1,4 +1,4 @@
-import type { IWorkflow, IWorkflowStep } from "../types/workflow";
+import type { IWorkflow, IWorkflowStep, ValidationRule } from "../types/workflow";
 import type { HttpMethod } from "../types/builtin";
 import { WorkflowStepType, WorkflowTriggerType } from "../types/workflow";
 import type {
@@ -22,6 +22,25 @@ export type StepDecoratorOptions = {
   then?: string;
   else?: string;
 };
+
+export type ConnectorStepHeaderValue = string | number | boolean;
+
+export type ConnectorStepHeaders =
+  | Record<string, ConnectorStepHeaderValue>
+  | Array<{ key: string; value: ConnectorStepHeaderValue }>;
+
+export type ConnectorStepConfig = {
+  body?: Record<string, unknown> | string | null;
+  params?: Record<string, unknown>;
+  pathParams?: Record<string, unknown>;
+  headers?: ConnectorStepHeaders;
+  vars?: Record<string, unknown>;
+  timeout?: number;
+  files?: unknown;
+  installation_id?: string;
+  connection_id?: string;
+  database?: string;
+} & Record<string, unknown>;
 
 export type WorkflowDecoratorsTrigger = {
   type: WorkflowTriggerType;
@@ -47,12 +66,38 @@ export type WorkflowDecoratorsMeta = {
 };
 
 export const WORKFLOW_META_KEY = Symbol.for("cliodot:workflowMeta");
+export const CONNECTOR_META_KEY = Symbol.for("cliodot:connectorMeta");
+
+export type ConnectorActionMeta = {
+  actionName: string;
+  methodKey: string;
+  type: "endpoint" | "custom";
+  httpConfig?: {
+    method: HttpMethod;
+    path: string;
+    [key: string]: any;
+  };
+};
+
+export type ConnectorDecoratorsMeta = {
+  connectorId?: string;
+  connectorName?: string;
+  config?: any;
+  actions: ConnectorActionMeta[];
+};
 
 export function getOrCreateWorkflowMeta(ctor: any): WorkflowDecoratorsMeta {
   if (!ctor[WORKFLOW_META_KEY]) {
     ctor[WORKFLOW_META_KEY] = { steps: [] } satisfies WorkflowDecoratorsMeta;
   }
   return ctor[WORKFLOW_META_KEY] as WorkflowDecoratorsMeta;
+}
+
+export function getOrCreateConnectorMeta(ctor: any): ConnectorDecoratorsMeta {
+  if (!ctor[CONNECTOR_META_KEY]) {
+    ctor[CONNECTOR_META_KEY] = { actions: [] } satisfies ConnectorDecoratorsMeta;
+  }
+  return ctor[CONNECTOR_META_KEY] as ConnectorDecoratorsMeta;
 }
 
 export function sanitizeStepId(id: string): string {
@@ -76,22 +121,66 @@ export function withThenElse(step: IWorkflowStep, thenId?: string, elseId?: stri
   return step;
 }
 
+const CONNECTOR_STEP_RESERVED = new Set([
+  "body",
+  "params",
+  "pathParams",
+  "headers",
+  "vars",
+  "timeout",
+  "files",
+  "installation_id",
+  "connection_id",
+  "database",
+]);
+
 export function makeConnectorStep(
   id: string,
   connectorId: string,
   action: string,
-  config: Record<string, any> = {}
+  config: ConnectorStepConfig = {} as ConnectorStepConfig
 ): IWorkflowStep {
-  const { body, params, pathParams, ...rest } = config;
-  return {
+  const c = config as Record<string, unknown>;
+  const explicitBody = c.body;
+  const params = c.params;
+  const pathParams = c.pathParams;
+  const headers = c.headers;
+  const vars = c.vars;
+  const timeout = c.timeout;
+  const files = c.files;
+  const installation_id = c.installation_id;
+  const connection_id = c.connection_id;
+  const database = c.database;
+
+  const rest: Record<string, unknown> = {};
+  for (const k of Object.keys(c)) {
+    if (!CONNECTOR_STEP_RESERVED.has(k)) rest[k] = c[k];
+  }
+
+  const body =
+    explicitBody !== undefined
+      ? explicitBody
+      : Object.keys(rest).length > 0
+        ? rest
+        : undefined;
+
+  const step: any = {
     id,
     type: WorkflowStepType.API_CALL,
     connector_id: connectorId,
     action,
-    params: params || rest,
-    pathParams: pathParams || params || rest,
-    body: body ?? rest,
-  } as any;
+  };
+  if (params !== undefined) step.params = params;
+  if (pathParams !== undefined) step.pathParams = pathParams;
+  if (headers !== undefined) step.headers = headers;
+  if (vars !== undefined) step.vars = vars;
+  if (timeout !== undefined) step.timeout = timeout;
+  if (files !== undefined) step.files = files;
+  if (installation_id !== undefined) step.installation_id = installation_id;
+  if (connection_id !== undefined) step.connection_id = connection_id;
+  if (database !== undefined) step.database = database;
+  if (body !== undefined) step.body = body;
+  return step;
 }
 
 export function makeDbStep(
@@ -120,12 +209,12 @@ export function makeValidatorStep(
     | Record<string, string>
     | Array<{
         fields: string[];
-        validators: Array<{ name: string; config?: Record<string, any> }>;
+        validators: Array<ValidationRule>;
       }>
 ): IWorkflowStep {
   let validationGroups: Array<{
     fields: string[];
-    validators: Array<{ name: string; config?: Record<string, any> }>;
+    validators: Array<ValidationRule>;
   }>;
   if (Array.isArray(fieldsOrGroups)) {
     validationGroups = fieldsOrGroups;
@@ -133,7 +222,7 @@ export function makeValidatorStep(
     validationGroups = [
       {
         fields: Object.values(fieldsOrGroups),
-        validators: Object.entries(fieldsOrGroups).map(() => ({ name: "required", config: {} })),
+        validators: Object.entries(fieldsOrGroups).map(() => ({ name: "required" as const, config: {} })),
       },
     ];
   }
@@ -300,5 +389,12 @@ export function makeDelayStep(id: string, ms: number): IWorkflowStep {
 
 export function makeNotifyStep(id: string, channel: string, message: string): IWorkflowStep {
   return { id, type: WorkflowStepType.NOTIFY, channel, message } as any;
+}
+
+export function makeCustomStep(id: string): IWorkflowStep {
+  return {
+    id,
+    type: WorkflowStepType.CUSTOM,
+  } as any;
 }
 

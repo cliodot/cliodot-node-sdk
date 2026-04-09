@@ -68,3 +68,60 @@ export function buildWorkflowFromClass(workflowClass: any): IWorkflow {
   return workflow as IWorkflow;
 }
 
+export function buildConnectorFromClass(ConnectorClass: any): Record<string, any> {
+  const meta = ConnectorClass[Symbol.for("cliodot:connectorMeta")] as any;
+  if (!meta) {
+    throw new Error(`Class ${ConnectorClass.name} is not decorated with @ConnectorClass`);
+  }
+  
+  const actionsMap: Record<string, string> = {};
+  const endpoints: any[] = [];
+  
+  for (const action of meta.actions) {
+    actionsMap[action.methodKey] = action.actionName;
+    if (action.type === "endpoint") {
+        endpoints.push({
+            name: action.actionName,
+            method: action.httpConfig.method,
+            path: action.httpConfig.path,
+            ...action.httpConfig, // includes config object
+        });
+    }
+  }
+
+  const instance = new ConnectorClass();
+
+  const connectorDef: any = {
+    _id: meta.connectorId,
+    id: meta.connectorId, // keeping id for backwards compatibility
+    name: meta.connectorName,
+    actions: actionsMap,
+    ...meta.config, // Spread user provided config (type: "REST", base_url, auth, etc.)
+  };
+
+  // If endpoints are found, attach them as REST mappings natively.
+  if (endpoints.length > 0) {
+      connectorDef.endpoints = endpoints;
+  }
+
+  const hasCustomActions = meta.actions.some((a: any) => a.type === "custom");
+  if (hasCustomActions) {
+    connectorDef.execute = async (actionName: string, options: any) => {
+      const actionMeta = meta.actions.find(
+        (a: any) =>
+          a.actionName === actionName ||
+          a.methodKey === actionName ||
+          actionsMap[a.methodKey] === actionName
+      );
+      if (!actionMeta) throw new Error(`Action ${actionName} not found on connector ${meta.connectorId}`);
+
+      if (actionMeta.type === "custom") {
+        return instance[actionMeta.methodKey](options);
+      }
+      throw new Error(`Action ${actionName} is an HTTP endpoint and should be executed by the SDK runner inherently.`);
+    };
+  }
+
+  return connectorDef;
+}
+
