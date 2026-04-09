@@ -37,17 +37,25 @@ function parseExpiryMsFromLoginBody(data: any, token: string): number | null {
   return decodeJwtExpMs(token);
 }
 
-function toFinalWorkflowResult(data: any): any {
+function toFinalWorkflowResult(data: any, debug?: boolean): any {
 
   if (data?.result?.response) {
-    return{
+    const result: any = {
       statusCode: data.result.response.statusCode,
       data: data.result.response?.body ?? {},
+    };
+    if (debug && data.result.stepResults) {
+      result._debug = { stepResults: data.result.stepResults };
     }
+    return result;
   }
   if (data?.result?.stepResults) {
-    const keys = Object.keys(data.result.stepResults)
-    return data.result.stepResults[keys?.[0]]
+    const keys = Object.keys(data.result.stepResults);
+    const result = data.result.stepResults[keys?.[0]];
+    if (debug) {
+      return { data: result, _debug: { stepResults: data.result.stepResults } };
+    }
+    return result;
   }
   return data;
 }
@@ -58,6 +66,7 @@ export interface FlosyncClientConfig {
   apiSecret: string;
   tokenRefreshMarginMs?: number;
   tokenFallbackReuseMs?: number;
+  debug?: boolean;
 }
 
 export class FlosyncClient {
@@ -70,6 +79,7 @@ export class FlosyncClient {
   private tokenFallbackReuseMs: number;
   private loginPromise: Promise<void> | null = null;
   private axios: AxiosInstance;
+  public debug: boolean;
 
   constructor(config: FlosyncClientConfig) {
     this.baseUrl = (config.baseUrl ?? DEFAULT_CLIODOT_BASE_URL).replace(/\/+$/, "");
@@ -77,6 +87,7 @@ export class FlosyncClient {
     this.apiSecret = config.apiSecret;
     this.tokenRefreshMarginMs = config.tokenRefreshMarginMs ?? DEFAULT_TOKEN_REFRESH_MARGIN_MS;
     this.tokenFallbackReuseMs = config.tokenFallbackReuseMs ?? DEFAULT_FALLBACK_REUSE_MS;
+    this.debug = config.debug ?? false;
     this.axios = axios.create({
       baseURL: `${this.baseUrl}/api-core/cliodot`,
       timeout: 30000,
@@ -315,7 +326,7 @@ export class FlosyncClient {
     },
     run: async (groupId: string, triggerId: string, payload: { payload?: any; environment?: "dev" | "prod" } = {}): Promise<any> => {
       const data = await this.request("POST", `/workflows/${groupId}/test/trigger/${triggerId}`, payload);
-      return toFinalWorkflowResult(data);
+      return toFinalWorkflowResult(data, this.debug);
     },
     runByWebhook: async (webhookPath: string, method: string, payload: { body?: any; environment?: "dev" | "prod" } = {}): Promise<any> => {
       const { environment, body, ...rest } = payload;
@@ -325,7 +336,7 @@ export class FlosyncClient {
         payload: { ...(body ?? {}), ...rest },
         ...(environment && { environment }),
       });
-      return toFinalWorkflowResult(data);
+      return toFinalWorkflowResult(data, this.debug);
     },
     promote: async (groupId: string): Promise<any> => {
       return this.request("POST", `/workflows/${groupId}/promote`);

@@ -258,6 +258,132 @@ export const ValidatorFns: Record<string, (v: any, options?: ValidationOptions) 
     if (maxLength !== undefined && trimmed.length > maxLength) return { valid: false, error: message || `Address must be at most ${maxLength} characters`, message: message || `Address must be at most ${maxLength} characters long` };
     return { valid: true };
   },
+  is_uuid: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return typeof v === "string" && regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid UUID format", message: message || "Value must be a valid UUID" };
+  },
+  is_cuid: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const regex = /^c[^\s-]{8,}$/i;
+    return typeof v === "string" && regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid CUID format", message: message || "Value must be a valid CUID" };
+  },
+  is_jwt: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const regex = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/;
+    return typeof v === "string" && regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid JWT format", message: message || "Value must be a valid JWT" };
+  },
+  is_json: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    if (typeof v !== "string") return { valid: false, error: message || "Value must be a string", message: message || "JSON validation requires a string" };
+    try {
+      JSON.parse(v);
+      return { valid: true };
+    } catch {
+      return { valid: false, error: message || "Invalid JSON format", message: message || "Value must be valid JSON" };
+    }
+  },
+  is_alphanumeric: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    return typeof v === "string" && /^[a-zA-Z0-9]+$/.test(v) ? { valid: true } : { valid: false, error: message || "Must be alphanumeric", message: message || "Value must contain only letters and numbers" };
+  },
+  is_alpha: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    return typeof v === "string" && /^[a-zA-Z]+$/.test(v) ? { valid: true } : { valid: false, error: message || "Must contain only letters", message: message || "Value must contain only letters" };
+  },
+  is_numeric_string: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    return typeof v === "string" && /^[0-9]+$/.test(v) ? { valid: true } : { valid: false, error: message || "Must contain only numbers", message: message || "Value must contain only numbers" };
+  },
+  is_hex_color: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    return typeof v === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v) ? { valid: true } : { valid: false, error: message || "Invalid hex color", message: message || "Value must be a valid hex color" };
+  },
+  is_base64: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+    return typeof v === "string" && regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid base64 string", message: message || "Value must be base64 encoded" };
+  },
+  is_credit_card: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    if (typeof v !== "string") return { valid: false, error: message || "Credit card must be a string", message: message || "Value must be a string" };
+    const sanitized = v.replace(/[- ]/g, "");
+    if (!/^\d{13,19}$/.test(sanitized)) return { valid: false, error: message || "Invalid credit card format", message: message || "Invalid credit card format" };
+    let sum = 0;
+    let alternate = false;
+    for (let i = sanitized.length - 1; i >= 0; i--) {
+      let n = parseInt(sanitized.charAt(i), 10);
+      if (alternate) {
+        n *= 2;
+        if (n > 9) n = (n % 10) + 1;
+      }
+      sum += n;
+      alternate = !alternate;
+    }
+    return sum % 10 === 0 ? { valid: true } : { valid: false, error: message || "Invalid credit card number", message: message || "Value must be a valid credit card" };
+  },
+  is_lowercase: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    return typeof v === "string" && v === v.toLowerCase() ? { valid: true } : { valid: false, error: message || "Must be lowercase", message: message || "Value must be lowercase" };
+  },
+  is_uppercase: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    return typeof v === "string" && v === v.toUpperCase() ? { valid: true } : { valid: false, error: message || "Must be uppercase", message: message || "Value must be uppercase" };
+  },
+  is_slug: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    return typeof v === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v) ? { valid: true } : { valid: false, error: message || "Invalid slug format", message: message || "Value must be a valid slug" };
+  },
+  is_mac_address: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const regex = /^([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2})$/;
+    return typeof v === "string" && regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid MAC address", message: message || "Value must be a valid MAC address" };
+  },
+  is_port: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const port = typeof v === "string" ? parseInt(v, 10) : v;
+    return typeof port === "number" && port >= 0 && port <= 65535 ? { valid: true } : { valid: false, error: message || "Invalid port number", message: message || "Port must be between 0 and 65535" };
+  },
+  is_currency: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const regex = /^(?!0\.00)\d{1,3}(,\d{3})*(\.\d\d)?$/;
+    let checkValue = typeof v === "number" ? v.toString() : v;
+    if (typeof checkValue === "string" && checkValue.startsWith("$")) checkValue = checkValue.substring(1);
+    return typeof checkValue === "string" && regex.test(checkValue) ? { valid: true } : { valid: false, error: message || "Invalid currency format", message: message || "Value must be a valid currency amount" };
+  },
+  is_latitude: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const val = typeof v === "string" ? parseFloat(v) : v;
+    return typeof val === "number" && val >= -90 && val <= 90 ? { valid: true } : { valid: false, error: message || "Invalid latitude", message: message || "Latitude must be between -90 and 90" };
+  },
+  is_longitude: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { message } = options;
+    const val = typeof v === "string" ? parseFloat(v) : v;
+    return typeof val === "number" && val >= -180 && val <= 180 ? { valid: true } : { valid: false, error: message || "Invalid longitude", message: message || "Longitude must be between -180 and 180" };
+  },
+  is_ip: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { version, message } = options;
+    if (typeof v !== "string") return { valid: false, error: message || "IP must be a string", message: message || "Value must be a string" };
+    const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    const ipv6Regex = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/;
+    if (version === 4) return ipv4Regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid IPv4 address", message: message || "Value must be a valid IPv4 address" };
+    if (version === 6) return ipv6Regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid IPv6 address", message: message || "Value must be a valid IPv6 address" };
+    return ipv4Regex.test(v) || ipv6Regex.test(v) ? { valid: true } : { valid: false, error: message || "Invalid IP address", message: message || "Value must be a valid IP address" };
+  },
+  is_strong_password: (v: any, options: ValidationOptions = {}): ValidationResult => {
+    const { minLength = 8, minLowercase = 1, minUppercase = 1, minNumbers = 1, minSymbols = 1, message } = options;
+    if (typeof v !== "string") return { valid: false, error: message || "Password must be a string", message: message || "Value must be a string" };
+    if (v.length < minLength) return { valid: false, error: message || `Password must be at least ${minLength} characters`, message: message || `Password must be at least ${minLength} characters long` };
+    const lowercaseCount = (v.match(/[a-z]/g) || []).length;
+    if (lowercaseCount < minLowercase) return { valid: false, error: message || `Password needs ${minLowercase} lowercase letter(s)`, message: message || `Password needs at least ${minLowercase} lowercase letter(s)` };
+    const uppercaseCount = (v.match(/[A-Z]/g) || []).length;
+    if (uppercaseCount < minUppercase) return { valid: false, error: message || `Password needs ${minUppercase} uppercase letter(s)`, message: message || `Password needs at least ${minUppercase} uppercase letter(s)` };
+    const numberCount = (v.match(/[0-9]/g) || []).length;
+    if (numberCount < minNumbers) return { valid: false, error: message || `Password needs ${minNumbers} number(s)`, message: message || `Password needs at least ${minNumbers} number(s)` };
+    const symbolCount = (v.match(/[^a-zA-Z0-9]/g) || []).length;
+    if (symbolCount < minSymbols) return { valid: false, error: message || `Password needs ${minSymbols} symbol(s)`, message: message || `Password needs at least ${minSymbols} symbol(s)` };
+    return { valid: true };
+  },
 };
 
 export function applyValidations(

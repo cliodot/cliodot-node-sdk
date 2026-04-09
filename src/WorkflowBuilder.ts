@@ -7,7 +7,8 @@ import {
 } from "./types/workflow";
 import type {
   AuthConnectorId,
-  AuthAction,
+  AuthActionForConnector,
+  AuthConfigFor,
   UtilityConnectorId,
   UtilityAction,
   EncryptionConnectorId,
@@ -17,6 +18,14 @@ import type {
   HttpMethod,
   ResponderType,
 } from "./types/builtin";
+import { makeConnectorStep } from "./decorators/metadata";
+import type { ConnectorStepConfig } from "./decorators/metadata";
+import {
+  isTypedConnectorDef,
+  type TypedConnectorDef,
+  type ConnectorTypedRequestConfig,
+  type ConnectorActionSchema,
+} from "./connectors/registry";
 
 export interface StepResult {
   step: IWorkflowStep;
@@ -41,22 +50,42 @@ function createStepResult(step: IWorkflowStep): StepResult {
 type StepBuilderFn = (s: StepBuilder) => StepResult | IWorkflowStep;
 
 export class StepBuilder {
+  connector<
+    TActions extends Record<string, string>,
+    TSchemas extends Record<string, ConnectorActionSchema>,
+    TKey extends keyof TActions,
+  >(
+    connectorDef: TypedConnectorDef<TActions, TSchemas>,
+    actionKey: TKey,
+    config?: ConnectorTypedRequestConfig<TypedConnectorDef<TActions, TSchemas>, TKey>
+  ): StepResult;
   connector(
     connectorId: string,
     action: string,
-    config: Record<string, any> = {}
+    config?: ConnectorStepConfig
+  ): StepResult;
+  connector(
+    connectorIdOrDef: string | TypedConnectorDef<any, any>,
+    actionOrKey: string,
+    config?: ConnectorStepConfig
   ): StepResult {
-    const { body, params, pathParams, ...rest } = config;
-    const step: IWorkflowStep = {
-      id: "",
-      type: WorkflowStepType.API_CALL,
-      connector_id: connectorId,
-      action,
-      params: params || rest,
-      pathParams: pathParams || params || rest,
-      body: body ?? rest,
-    };
-    return createStepResult(step);
+    const resolved = (config ?? {}) as ConnectorStepConfig;
+    let connectorId: string;
+    let action: string;
+    if (isTypedConnectorDef(connectorIdOrDef)) {
+      connectorId = connectorIdOrDef.id;
+      const key = actionOrKey as keyof typeof connectorIdOrDef.actions;
+      const mapped = connectorIdOrDef.actions[key];
+      if (typeof mapped !== "string") {
+        throw new Error(`Unknown action key on connector ${connectorId}: ${String(actionOrKey)}`);
+      }
+      action = mapped;
+    } else {
+      connectorId = connectorIdOrDef as string;
+      action = actionOrKey;
+    }
+    const step = makeConnectorStep("", connectorId, action, resolved);
+    return createStepResult(step as IWorkflowStep);
   }
 
   db(
@@ -164,10 +193,13 @@ export class StepBuilder {
     return createStepResult(step);
   }
 
-  auth(
-    connectorId: AuthConnectorId,
-    action: AuthAction,
-    config: Record<string, any>
+  auth<
+    TConnectorId extends AuthConnectorId,
+    TAction extends AuthActionForConnector<TConnectorId>,
+  >(
+    connectorId: TConnectorId,
+    action: TAction,
+    config: AuthConfigFor<TConnectorId, TAction>
   ): StepResult {
     const step: IWorkflowStep = {
       id: "",

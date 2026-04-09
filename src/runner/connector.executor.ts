@@ -1,4 +1,5 @@
 import axios from "axios";
+import jwt from "jsonwebtoken";
 import { renderTemplate } from "../template";
 import { jsonResponderConnector } from "../connectors/builtin";
 import { executeString } from "./utilities/string.executor";
@@ -35,6 +36,25 @@ async function renderBodyRecursive(
     return out;
   }
   return val;
+}
+
+function rethrowConnectorHttpError(err: unknown): never {
+  if (axios.isAxiosError(err)) {
+    const res = err.response;
+    const base = err.message || "Request failed";
+    const wrapped: any = new Error(base);
+    if (res) {
+      wrapped.response = {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+        data: res.data,
+      };
+    }
+    wrapped.cause = err;
+    throw wrapped;
+  }
+  throw err;
 }
 
 async function executeResponder(connectorDef: ConnectorDef, options: ExecOptions, context: any): Promise<any> {
@@ -155,7 +175,13 @@ async function executeRestConnector(
     headers[headerKey] = prefix + connectorConfig.apiKey;
   }
 
-  const resp = await axios(cfg);
+  let resp;
+  try {
+    resp = await axios(cfg);
+  } catch (e) {
+    rethrowConnectorHttpError(e);
+  }
+
   const raw = resp.data;
   if (endpoint.response_mapping && typeof endpoint.response_mapping === "object") {
     const mapped: Record<string, any> = {};
@@ -376,6 +402,28 @@ async function executeDbConnector(
   throw new Error("Unsupported database connector: " + connectorId);
 }
 
+function bearerExpiresAtFromExpiresIn(expiresIn: string | number): number | null {
+  if (typeof expiresIn === "string") {
+    const match = expiresIn.match(/^(\d+)([smhd])$/);
+    if (match) {
+      const value = parseInt(match[1], 10);
+      const unit = match[2];
+      const multipliers: Record<string, number> = {
+        s: 1000,
+        m: 60 * 1000,
+        h: 60 * 60 * 1000,
+        d: 24 * 60 * 60 * 1000,
+      };
+      return Date.now() + value * (multipliers[unit] || 1000);
+    }
+    return null;
+  }
+  if (typeof expiresIn === "number") {
+    return Date.now() + expiresIn * 1000;
+  }
+  return null;
+}
+
 async function executeAuthConnector(
   connectorDef: ConnectorDef,
   actionName: string,
@@ -384,22 +432,197 @@ async function executeAuthConnector(
 ): Promise<any> {
   const authType = connectorDef._id?.split(".")[0] || "bearer";
   const opts = options.body || options;
-  const token = opts.token ?? context.headers?.authorization?.replace(/^Bearer\s+/i, "") ?? context.token;
+  const tokenFromHeader = context.headers?.authorization?.replace(/^Bearer\s+/i, "");
+  const token = opts.token ?? tokenFromHeader ?? context.token;
+  const actionMethodRaw = actionName.split(".").pop() || "validate";
+  const actionMethod = actionMethodRaw.toLowerCase();
   if (authType === "bearer") {
-    const actionMethod = actionName.split(".").pop() || "validate";
+    if (actionMethod === "create") {
+      const headerName = opts.header_name || "Authorization";
+      const prefix = opts.prefix ?? "Bearer ";
+      const secret = opts.token_secret ?? opts.tokenSecret;
+      if (secret) {
+        const payload = opts.payload ?? context?.payload ?? {};
+        const expiresIn = opts.expires_in ?? opts.expiresIn ?? context?.expiresIn ?? "1h";
+        const defaultPayload = {
+          sub: (payload as { sub?: string; id?: string })?.sub ?? (payload as { id?: string })?.id ?? "workflow",
+          iat: Math.floor(Date.now() / 1000),
+          ...payload,
+        };
+        try {
+          const signOpts =
+            typeof expiresIn === "number"
+              ? ({ expiresIn } as jwt.SignOptions)
+              : ({ expiresIn: String(expiresIn) } as jwt.SignOptions);
+          const signed = jwt.sign(defaultPayload, secret, signOpts);
+          const expiresAtMs = bearerExpiresAtFromExpiresIn(
+            typeof expiresIn === "number" ? expiresIn : String(expiresIn)
+          );
+          const expiresAtIso = expiresAtMs != null ? new Date(expiresAtMs).toISOString() : null;
+          return {
+            ok: true,
+            valid: true,
+            token: signed,
+            token_type: "Bearer",
+            expires_in: expiresIn,
+            expires_at: expiresAtIso,
+            payload: defaultPayload,
+            formatted_token: `${prefix}${signed}`,
+            auth: {
+              type: "bearer",
+              header_name: headerName,
+              prefix,
+              value: `${prefix}${signed}`,
+            },
+          };
+        } catch (e: any) {
+          return {
+            ok: false,
+            valid: false,
+            error: e?.message || "Failed to create bearer token",
+            message: "Failed to create bearer token",
+          };
+        }
+      }
+      const createdToken = opts.token ?? token;
+      if (!createdToken) {
+        return { valid: false, ok: false, error: "Bearer token not provided", message: "Token is required" };
+      }
+      const expiresInOpaque = opts.expires_in ?? null;
+      return {
+        ok: true,
+        valid: true,
+        token: createdToken,
+        auth: {
+          type: "bearer",
+          header_name: headerName,
+          prefix,
+          value: `${prefix}${createdToken}`,
+          ...(expiresInOpaque != null ? { expires_in: expiresInOpaque } : {}),
+        },
+      };
+    }
     if (actionMethod === "validate") {
       if (!token) {
         return { valid: false, ok: false, error: "Bearer token not provided", message: "Token is required" };
+      }
+      const validateSecret = opts.token_secret ?? opts.tokenSecret;
+      if (validateSecret) {
+        try {
+          const decoded = jwt.verify(token, validateSecret);
+          return {
+            valid: true,
+            ok: true,
+            token,
+            decoded,
+            payload: decoded,
+            message: "Token is valid",
+          };
+        } catch (error: any) {
+          let decodedPayload: jwt.JwtPayload | string | null = null;
+          try {
+            decodedPayload = jwt.decode(token, { complete: false });
+          } catch {}
+          return {
+            valid: false,
+            ok: false,
+            token: null,
+            decoded: decodedPayload,
+            payload: decodedPayload,
+            error: error?.message || "Token validation failed",
+            message: "Token is invalid or expired",
+          };
+        }
+      }
+      const requiredPrefix = opts.required_prefix;
+      const rawAuthHeader = context.headers?.authorization || "";
+      if (requiredPrefix && rawAuthHeader && !rawAuthHeader.startsWith(requiredPrefix)) {
+        return { valid: false, ok: false, token, error: "Bearer token prefix mismatch" };
       }
       return { valid: true, ok: true, token, message: "Token accepted" };
     }
   }
   if (authType === "api_key") {
-    const key = opts.api_key ?? opts.token ?? context.headers?.["x-api-key"] ?? token;
+    const keyName = opts.name || "x-api-key";
+    const keyFromHeader = context.headers?.[keyName] ?? context.headers?.["x-api-key"];
+    const keyFromQuery = context.query?.[keyName] ?? context.params?.[keyName];
+    const key = opts.api_key ?? opts.token ?? keyFromHeader ?? keyFromQuery ?? token;
+    if (actionMethod === "create") {
+      if (!key) {
+        return { valid: false, ok: false, error: "API key not provided" };
+      }
+      const inLocation = opts.in || "header";
+      const prefix = opts.prefix || "";
+      return {
+        valid: true,
+        ok: true,
+        token: key,
+        auth: {
+          type: "api_key",
+          in: inLocation,
+          name: keyName,
+          value: `${prefix}${key}`,
+        },
+      };
+    }
     if (!key) {
       return { valid: false, ok: false, error: "API key not provided" };
     }
-    return { valid: true, ok: true, token: key };
+    return { valid: true, ok: true, token: key, name: keyName };
+  }
+  if (authType === "basic") {
+    const username = opts.username ?? opts.user;
+    const password = opts.password;
+    if (actionMethod === "create") {
+      if (!username || !password) {
+        return { valid: false, ok: false, error: "Username and password are required" };
+      }
+      const value = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+      return {
+        valid: true,
+        ok: true,
+        auth: { type: "basic", username, value },
+      };
+    }
+    const expectedUsername = opts.expected_username ?? opts.username;
+    const expectedPassword = opts.expected_password ?? opts.password;
+    const basicHeader = context.headers?.authorization || "";
+    let providedUsername = opts.username;
+    let providedPassword = opts.password;
+    if ((!providedUsername || !providedPassword) && basicHeader.startsWith("Basic ")) {
+      try {
+        const decoded = Buffer.from(basicHeader.replace(/^Basic\s+/i, ""), "base64").toString("utf8");
+        const parts = decoded.split(":");
+        providedUsername = providedUsername ?? parts[0];
+        providedPassword = providedPassword ?? parts.slice(1).join(":");
+      } catch {}
+    }
+    if (expectedUsername && expectedPassword) {
+      const isValid = providedUsername === expectedUsername && providedPassword === expectedPassword;
+      return { valid: isValid, ok: isValid, username: providedUsername };
+    }
+    const present = Boolean(providedUsername && providedPassword);
+    return { valid: present, ok: present, username: providedUsername };
+  }
+  if (authType === "custom_header") {
+    const headers = (opts.headers || {}) as Record<string, any>;
+    if (actionMethod === "create") {
+      return {
+        valid: true,
+        ok: true,
+        auth: {
+          type: "custom_header",
+          headers,
+        },
+      };
+    }
+    const requiredHeaders = Array.isArray(opts.required_headers) ? opts.required_headers : Object.keys(headers);
+    const sourceHeaders = context.headers || {};
+    const missing = requiredHeaders.filter((h: string) => sourceHeaders[h] == null);
+    if (missing.length > 0) {
+      return { valid: false, ok: false, error: `Missing required headers: ${missing.join(", ")}` };
+    }
+    return { valid: true, ok: true };
   }
   return { valid: true, ok: true };
 }
@@ -1307,12 +1530,39 @@ async function executePassword(actionName: string, opts: any, str: string): Prom
   return { value: str };
 }
 
+function resolveRegisteredRestActionName(connectorDef: ConnectorDef, actionName: string): string | null {
+  const endpoints = connectorDef.endpoints || [];
+  if (!endpoints.length) return null;
+  if (endpoints.some((e: any) => e.name === actionName || e.action === actionName)) {
+    return actionName;
+  }
+  const actions = connectorDef.actions;
+  if (actions && typeof actions === "object" && !Array.isArray(actions) && Object.prototype.hasOwnProperty.call(actions, actionName)) {
+    const mapped = actions[actionName];
+    if (
+      typeof mapped === "string" &&
+      endpoints.some((e: any) => e.name === mapped || e.action === mapped)
+    ) {
+      return mapped;
+    }
+  }
+  return null;
+}
+
 export async function executeConnectorAction(
   connectorDef: ConnectorDef,
   actionName: string,
   options: ExecOptions = {},
   context: any = {}
 ): Promise<any> {
+  const restActionName = resolveRegisteredRestActionName(connectorDef, actionName);
+  if (
+    restActionName &&
+    (connectorDef.type === "REST" || connectorDef.type === "rest" || connectorDef.endpoints?.length)
+  ) {
+    return executeRestConnector(connectorDef, restActionName, options, context);
+  }
+
   if (typeof connectorDef.execute === "function") {
     const result = await connectorDef.execute(actionName, options, context);
     return { raw: result, mapped: result };

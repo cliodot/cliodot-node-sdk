@@ -99,6 +99,7 @@ flosync.configure({
   apiSecret: process.env.FLOSYNC_API_SECRET,
   baseUrl: 'http://localhost:8080' //optional,
   projectId: process.env.FLOSYNC_PROJECT_ID,
+  debug: false, // Enable to include stepResults in every response
   connectors: {
     'mongodb.system': { uri: process.env.MONGO_URI, database: 'myapp' },
     'mysql.system': { uri: process.env.MYSQL_URI },
@@ -235,14 +236,185 @@ The overridden output becomes the value of `v.stepResult("<stepId>")` for subseq
 
 In `stage: "post"`, `ctx.input` is the decorated step output produced by the connector/function call.
 
-Example: list todos using decorators
+### `WorkflowContext<TInput, TSteps, TVars>`
+
+Instead of using `ctx: any`, you can type the context object passed to step methods. Import `WorkflowContext` from `cliodot`:
+
+```typescript
+import type { WorkflowContext } from "cliodot";
+```
+
+`WorkflowContext` is generic with three optional type parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `TInput` | `Record<string, any>` | Shape of `ctx.input` (previous step output or trigger data) |
+| `TSteps` | `Record<string, any>` | Shape of `ctx.steps` (accumulated step results) |
+| `TVars` | `Record<string, any>` | Shape of `ctx.vars` (workflow-level variables) |
+
+The full context object includes:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `input` | `TInput` | Input data for this step |
+| `trigger` | `any` | Raw trigger payload |
+| `steps` | `TSteps` | All step results keyed by step ID |
+| `vars` | `TVars` | Workflow variables (read/write via `setVars`) |
+| `headers` | `Record<string, string>` | HTTP headers from the request |
+| `params` | `Record<string, any>` | Merged query + route params |
+| `pathParams` | `Record<string, any>` | URL path parameters |
+| `query` | `Record<string, any>` | Query string parameters |
+| `body` | `any` | Raw request body |
+| `env` | `Record<string, string>` | Environment variables |
+
+The interface also has an index signature (`[key: string]: any`) so users can attach custom properties.
+
+### `StepOutput<T>`
+
+The return type for step methods that produce output. Import from `cliodot`:
+
+```typescript
+import type { StepOutput } from "cliodot";
+```
+
+```typescript
+export interface StepOutput<T = any> {
+  /** The output payload — stored in stepResults[stepId] */
+  out: T;
+  /** Optional: update workflow variables */
+  setVars?: Record<string, any>;
+}
+```
+
+Usage:
+
+```typescript
+@Connector(MyStore.id, MyStore.actions.list, {}, { order: 0, stage: "post" })
+list(ctx: WorkflowContext<{ items: Item[] }>): StepOutput<{ sorted: Item[] }> {
+  const sorted = [...ctx.input.items].sort((a, b) => a.id - b.id);
+  return { out: { sorted } };
+}
+```
+
+> **Note:** `StepOutput` is different from the `StepResult` exported by `WorkflowBuilder` (which is the builder-pattern return type with `.then()` / `.else()` chaining). Use `StepOutput` for decorator workflow method return types.
+
+### `@Step` — Custom Step Decorator
+
+`@Step` is a generic decorator for writing custom workflow step logic without needing to pair it with a connector, database, or other built-in step type. The method body is extracted at build time and executed as a code step with access to the full `WorkflowContext`.
+
+```typescript
+import { Workflow, Http, Step, Responder, buildWorkflowFromClass, v } from "cliodot";
+import type { WorkflowContext, StepOutput } from "cliodot";
+```
+
+**Options** (same as other step decorators):
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | `string` | method name | Custom step ID |
+| `order` | `number` | auto | Execution order |
+| `stage` | `"pre" \| "post"` | `"post"` | When the method body runs |
+| `then` | `string` | — | Step ID to jump to on success |
+| `else` | `string` | — | Step ID to jump to on failure |
+
+**Basic example:**
+
+```typescript
+@Workflow("greet-user", "Greet User")
+@Http("POST", "/greet")
+class GreetWorkflow {
+  @Step({ order: 0 })
+  greet(ctx: WorkflowContext<{ name: string }>): StepOutput<{ greeting: string }> {
+    const name = ctx.input.name || "World";
+    return { out: { greeting: `Hello, ${name}!` } };
+  }
+
+  @Responder("json", { body: { message: v.stepResult("greet", "greeting") } }, { order: 1 })
+  respond() {}
+}
+
+export const greetWorkflow = buildWorkflowFromClass(GreetWorkflow);
+```
+
+**With `setVars` and branching:**
+
+```typescript
+@Workflow("process-order", "Process Order")
+@Http("POST", "/orders/process")
+class ProcessOrderWorkflow {
+  @Step({ order: 0, then: "finalize", else: "reject" })
+  validate(ctx: WorkflowContext<{ amount: number; currency: string }>): StepOutput<{ valid: boolean }> {
+    const { amount, currency } = ctx.input;
+    const valid = amount > 0 && ["USD", "EUR", "GBP"].includes(currency);
+    return {
+      out: { valid },
+      setVars: { processedAt: new Date().toISOString() },
+    };
+  }
+
+  @Responder("json", { body: { ok: true, processedAt: v.vars("processedAt") } }, { order: 1 })
+  finalize() {}
+
+  @Responder("json", { statusCode: 400, body: { ok: false, error: "Invalid order" } }, { order: 2 })
+  reject() {}
+}
+```
+
+**Combining `@Step` with other decorators:**
+
+`@Step` can be freely combined with `@Connector`, `@Db`, `@Condition`, `@Responder`, etc. in the same workflow class:
+
+```typescript
+@Workflow("mixed-workflow", "Mixed Workflow")
+@Http("POST", "/mixed")
+class MixedWorkflow {
+  @Step({ order: 0 })
+  prepare(ctx: WorkflowContext<{ email: string }>): StepOutput<{ normalized: string }> {
+    return { out: { normalized: ctx.input.email.toLowerCase().trim() } };
+  }
+
+  @Db("mongodb", "findOne", { collection: "users", query: { email: v.stepResult("prepare", "normalized") } }, { order: 1 })
+  findUser() {}
+
+  @Condition(v.expr("stepResults.findUser != null"), { then: "found", else: "notFound", order: 2 })
+  check() {}
+
+  @Responder("json", { body: { user: v.stepResult("findUser") } }, { order: 3 })
+  found() {}
+
+  @Responder("json", { statusCode: 404, body: { error: "User not found" } }, { order: 4 })
+  notFound() {}
+}
+```
+
+### Decorator example: list todos with typed context
 
 ```typescript
 import { flosync, v, Workflow, Http, Connector, Condition, Responder, buildWorkflowFromClass, defineCustomConnector } from "cliodot";
+import type { WorkflowContext, StepOutput } from "cliodot";
 
 const CarrierStore = defineCustomConnector("carrier.store", {
   listTodos: "listTodos",
 });
+
+interface TodoItem {
+  title?: string;
+  completed?: boolean;
+  createdAt?: string;
+  [key: string]: any;
+}
+
+interface ListInput {
+  todos?: TodoItem[];
+  [key: string]: any;
+}
+
+interface ListOutput {
+  todos: Array<TodoItem & { title_upper: string; completed_label: string }>;
+  completedTodos: TodoItem[];
+  pendingTodos: TodoItem[];
+  stats: { total: number; completed: number; pending: number };
+}
 
 @Workflow("todos-list-decorators", "Todos List (Decorators)")
 @Http("GET", "/todos")
@@ -253,13 +425,38 @@ class TodosListDecoratorsWorkflow {
     { params: { limit: 10 } },
     { order: 0, stage: "post" }
   )
-  list(ctx: any) {
-    const todos = Array.isArray(ctx?.input?.todos) ? ctx.input.todos : [];
-    const formatted = todos.map((t: any) => {
+  list(ctx: WorkflowContext<ListInput>): StepOutput<ListOutput> {
+    const input = ctx?.input ?? {};
+    const todos = Array.isArray(input.todos) ? input.todos : [];
+    const sorted = [...todos].sort((a, b) =>
+      new Date(b?.createdAt ?? 0).getTime() - new Date(a?.createdAt ?? 0).getTime()
+    );
+    const completedTodos = sorted.filter((t) => Boolean(t?.completed));
+    const pendingTodos = sorted.filter((t) => !Boolean(t?.completed));
+
+    const decoratedTodos = sorted.map((t) => {
       const title = String(t?.title ?? "").trim();
-      return { ...t, title, title_upper: title.toUpperCase() };
+      return {
+        ...t,
+        title,
+        title_upper: title.toUpperCase(),
+        completed_label: t?.completed ? "done" as const : "todo" as const,
+      };
     });
-    return { out: { ...(ctx?.input ?? {}), todos: formatted } };
+
+    return {
+      out: {
+        ...input,
+        todos: decoratedTodos,
+        completedTodos,
+        pendingTodos,
+        stats: {
+          total: sorted.length,
+          completed: completedTodos.length,
+          pending: pendingTodos.length,
+        },
+      },
+    };
   }
 
   @Condition(v.stepResult("list", "valid"), { then: "ok", else: "unauth", order: 1 })
@@ -421,6 +618,123 @@ Example validation failure response body:
 
 `@Util` is typed the same way as `s.util(ConnectorId.Utility.String, "slugify", { ... })` in the fluent builder. `@Db` supports the `mongodb` and `mysql` engines (see [Database](#database)). Step IDs in `v.stepResult("slugify", "value")` refer to the **method name** you put on each decorated step (after sanitization, dots and hyphens in custom IDs become underscores).
 
+### Decorator Connectors
+
+For ultimate flexibility, you can define your own **Connectors** using class-based decorators instead of using the generic `defineCustomConnector` pattern. 
+
+Use the `@ConnectorClass` decorator and map endpoints instantly without rewriting HTTP loops or complex REST logic!
+
+```typescript
+import { ConnectorClass, ActionEndpoint, ActionCustom, buildConnectorFromClass, flosync } from "cliodot";
+
+// You can pass configuration mimicking flosync REST definition payloads directly into the class decorator:
+@ConnectorClass("paystack", "Paystack Integrations", {
+  type: "REST",
+  base_url: "https://api.paystack.co",
+  auth: { type: "bearer", token: process.env.PAYSTACK_SECRET_KEY }
+})
+export class Paystack {
+  
+  // Handled entirely by Flosync's underlying REST connector automatically!
+  @ActionEndpoint("initializeTransaction", "POST", "/transaction/initialize", {
+     headers: { "Content-Type": "application/json" }
+  })
+  initializeTransaction() {}
+
+  // Paths parameter resolution happens completely implicitly via the REST connector.
+  @ActionEndpoint("verifyTransaction", "GET", "/transaction/verify/:reference")
+  verifyTransaction() {}
+  
+  // Or, run a completely custom code execution if you need SDKs or Database integrations
+  @ActionCustom("generateSignature")
+  async generateSignature(payload: any) {
+     const crypto = require("crypto");
+     return { signature: crypto.createHmac('sha512', process.env.SECRET).update(payload.body.data).digest('hex') };
+  }
+}
+
+// Convert class into standard flosync connector schema
+export const paystackConfig = buildConnectorFromClass(Paystack);
+
+export const PaystackConnector = {
+  id: PaystackImplementation.id,
+  actions: PaystackImplementation.actions
+};
+
+// Register it natively just like any built-in module
+flosync.registerConnector(paystackConfig.id, paystackConfig);
+```
+
+#### Authentication Options
+
+Flosync supports built-in, natively executed REST authentication blocks inside the `@ConnectorClass` config object. You do not need to write boilerplate header injection code!
+
+1. **Bearer Token (*Default*)**
+   ```typescript
+   auth: { type: "bearer", token: "your-token", header_name: "Authorization", prefix: "Bearer " }
+   ```
+2. **API Key**
+   ```typescript
+   auth: { type: "api_key", api_key: "your-api-key", key_name: "x-api-key" }
+   ```
+3. **No Auth**
+   ```typescript
+   auth: { type: "none" }
+   ```
+
+Then hook it right into your workflows! This example uses `@Validator` for type-safe input checking, generates a unique payment reference using the built-in `utility.random` connector, and passes it to the Paystack API:
+
+```typescript
+import { Workflow, Http, Connector, Responder, Validator, v } from "cliodot";
+
+@Workflow("payment-initialize", "Initialize Payment")
+@Http("POST", "/payment/initialize")
+export class PaymentInitializeWorkflow {
+
+  @Validator([
+    {
+      fields: [v.body("email")],
+      validators: [{ name: "required" }, { name: "is_email" }]
+    },
+    {
+      fields: [v.body("amount")],
+      validators: [{ name: "required" }]
+    }
+  ], { order: 0, then: "generateReference", else: "invalid" })
+  validate() {}
+
+  @Responder("json", { 
+    statusCode: 400,
+    body: { 
+      ok: false,
+      message: "Validation failed", 
+      errors: v.stepResult("validate", "errors") 
+    } 
+  }, { order: 1 })
+  invalid() {}
+
+  @Connector("utility.random", "random_uuid", {}, { order: 2 })
+  generateReference() {}
+
+  @Connector(
+    PaystackConnector.id, 
+    PaystackConnector.actions.initializeTransaction, 
+    { 
+      body: { 
+        email: v.body("email"), 
+        amount: v.body("amount"),
+        reference: v.stepResult("generateReference", "value"),
+      } 
+    },
+    { order: 3 }
+  )
+  initialize() {}
+
+  @Responder("json", { body: { message: "Payment initialized successfully", data: v.stepResult("initialize") } }, { order: 4 })
+  respond() {}
+}
+```
+
 ### Custom `execute` connector plus decorators (catalog sample)
 
 For behavior that is not a REST template (in-memory demo data, your own SDK, legacy SOAP adapter, etc.), register a connector with an `execute` function, then call it from decorators with `@Connector` exactly like a built-in connector. This mirrors the `carrier.store` pattern: actions such as `listProducts` and `createProduct`, `options.body` / `options.params` / `options.pathParams` passed from the step config.
@@ -503,10 +817,10 @@ class CatalogListDecoratorsWorkflow {
     { params: { limit: v.query("limit") } },
     { order: 0, stage: "post" }
   )
-  list(ctx: any) {
+  list(ctx: WorkflowContext<{ products?: CatalogProduct[]; [k: string]: any }>): StepOutput<{ products: any[]; count: number }> {
     const input = ctx?.input ?? {};
     const items = Array.isArray(input.products) ? input.products : [];
-    const withLabels = items.map((p: CatalogProduct) => ({
+    const withLabels = items.map((p) => ({
       ...p,
       price_display: `$${Number(p.price).toFixed(2)}`,
     }));
@@ -540,7 +854,7 @@ class CatalogCreateDecoratorsWorkflow {
     { body: { name: v.body("name"), price: v.body("price") } },
     { order: 0, stage: "post" }
   )
-  save(ctx: any) {
+  save(ctx: WorkflowContext<{ ok?: boolean; product?: CatalogProduct; [k: string]: any }>): StepOutput<any> {
     const input = ctx?.input ?? {};
     if (!input.ok) return { out: input };
     const p = input.product as CatalogProduct;
@@ -699,6 +1013,192 @@ s.responder('redirect', { location: 'https://example.com', statusCode: 301 });
 s.responder('empty', { statusCode: 202 });
 ```
 
+## Validation
+
+The `@Validator` decorator provides type-safe input validation for workflow steps. Validators use a `ValidationRule` union type that gives you full IDE auto-completion for all available rules and their configuration options.
+
+### Basic usage
+
+```typescript
+import { Validator, v } from "cliodot";
+
+@Validator([
+  {
+    fields: [v.body("email")],
+    validators: [{ name: "required" }, { name: "is_email" }]
+  },
+  {
+    fields: [v.body("amount")],
+    validators: [{ name: "required" }, { name: "is_number" }]
+  }
+], { order: 0, then: "process", else: "error" })
+validate() {}
+```
+
+### Available validators
+
+| Validator | Config | Description |
+|-----------|--------|-------------|
+| `required` | `{ message? }` | Field must be present and non-null |
+| `not_empty` | `{ message? }` | Field must not be empty |
+| `is_empty` | `{ message? }` | Field must be empty |
+| `is_email` | `{ message? }` | Valid email format |
+| `is_number` | `{ message? }` | Must be a number |
+| `is_string` | `{ message? }` | Must be a string |
+| `is_boolean` | `{ message? }` | Must be a boolean |
+| `is_array` | `{ message? }` | Must be an array |
+| `is_object` | `{ message? }` | Must be an object |
+| `is_url` | `{ message? }` | Valid URL format |
+| `is_date` | `{ message? }` | Valid date format |
+| `is_uuid` | `{ message? }` | Valid UUID (v1-v5) |
+| `is_cuid` | `{ message? }` | Valid CUID |
+| `is_jwt` | `{ message? }` | Valid JWT structure (`header.payload.signature`) |
+| `is_json` | `{ message? }` | Valid parseable JSON string |
+| `is_alphanumeric` | `{ message? }` | Letters and numbers only |
+| `is_alpha` | `{ message? }` | Letters only |
+| `is_numeric_string` | `{ message? }` | Numeric digits only |
+| `is_hex_color` | `{ message? }` | Valid hex color (`#FFF` or `#123456`) |
+| `is_base64` | `{ message? }` | Valid base64 encoded string |
+| `is_credit_card` | `{ message? }` | Valid credit card (Luhn algorithm) |
+| `is_lowercase` | `{ message? }` | Must be all lowercase |
+| `is_uppercase` | `{ message? }` | Must be all uppercase |
+| `is_slug` | `{ message? }` | Valid URL slug (`my-cool-slug`) |
+| `is_mac_address` | `{ message? }` | Valid MAC address |
+| `is_port` | `{ message? }` | Valid TCP/UDP port (0-65535) |
+| `is_currency` | `{ message? }` | Valid currency format |
+| `is_latitude` | `{ message? }` | Valid latitude (-90 to 90) |
+| `is_longitude` | `{ message? }` | Valid longitude (-180 to 180) |
+| `is_strong_password` | `{ minLength?, minLowercase?, minUppercase?, minNumbers?, minSymbols?, message? }` | Configurable password strength |
+| `is_ip` | `{ version?: 4 \| 6, message? }` | Valid IPv4 or IPv6 address |
+| `is_phone` | `{ pattern?, message? }` | Phone number format |
+| `is_address` | `{ minLength?, maxLength?, message? }` | Address string checks |
+| `contains` / `not_contains` | `{ search, caseSensitive?, message? }` | String contains/excludes a value |
+| `begins_with` | `{ prefix, caseSensitive?, message? }` | String starts with prefix |
+| `ends_with` | `{ suffix, caseSensitive?, message? }` | String ends with suffix |
+| `is_in` / `not_in` | `{ values: any[], caseSensitive?, message? }` | Value is/isn't in a list |
+| `length` | `{ min?, max?, exact?, message? }` | String/array length bounds |
+| `range` | `{ min?, max?, message? }` | Numeric range bounds |
+| `matches` | `{ pattern, flags?, message? }` | Regex pattern match |
+| `equals` / `not_equals` | `{ value, message? }` | Strict equality check |
+| `greater_than` / `less_than` | `{ value: number, message? }` | Numeric comparison |
+| `greater_than_or_equal` / `less_than_or_equal` | `{ value: number, message? }` | Inclusive numeric comparison |
+
+### Configurable validators
+
+Some validators accept rich configuration objects with IDE autocomplete:
+
+```typescript
+// Strong password with custom constraints
+@Validator([
+  {
+    fields: [v.body("password")],
+    validators: [{
+      name: "is_strong_password",
+      config: { minLength: 12, minUppercase: 2, minSymbols: 1 }
+    }]
+  }
+], { order: 0, then: "register", else: "invalid" })
+validatePassword() {}
+
+// IP address with version lock
+@Validator([
+  {
+    fields: [v.body("server_ip")],
+    validators: [{ name: "is_ip", config: { version: 4 } }]
+  }
+], { order: 0, then: "connect", else: "invalid" })
+validateIP() {}
+
+// Range + custom message
+@Validator([
+  {
+    fields: [v.body("age")],
+    validators: [{
+      name: "range",
+      config: { min: 18, max: 120, message: "Age must be between 18 and 120" }
+    }]
+  }
+], { order: 0, then: "proceed", else: "invalid" })
+validateAge() {}
+```
+
+### Validation branching
+
+Use `then` and `else` to route the workflow based on validation results:
+
+```typescript
+@Validator([
+  { fields: [v.body("email")], validators: [{ name: "required" }, { name: "is_email" }] }
+], { order: 0, then: "process", else: "validationError" })
+validate() {}
+
+@Responder("json", {
+  statusCode: 400,
+  body: { ok: false, errors: v.stepResult("validate", "errors") }
+}, { order: 1 })
+validationError() {}
+```
+
+When validation fails, the `errors` object is populated with field-level error messages that the responder can return to the client.
+
+## Debug Mode
+
+Flosync includes a built-in debug mode that injects a `_debug` object into workflow responses, containing the full `stepResults` map of every step that executed. This is invaluable for development and troubleshooting without adding `console.log` statements.
+
+### Enabling debug
+
+**1. Global (via config)** — applies to all workflow runs:
+
+```typescript
+flosync.configure({
+  debug: true,
+  connectors: { ... },
+});
+```
+
+**2. Per-request (via header)** — enable for a single call:
+
+```bash
+curl -X POST http://localhost:3384/payment/initialize \
+  -H "Content-Type: application/json" \
+  -H "x-flosync-debug: true" \
+  -d '{"email": "user@example.com", "amount": 5000}'
+```
+
+**3. Per-request (via query param):**
+
+```bash
+curl "http://localhost:3384/books?debug=true"
+```
+
+### Debug output
+
+When debug mode is active, a `_debug` key is appended to the response body:
+
+```json
+{
+  "message": "Payment initialized successfully",
+  "data": {
+    "authorization_url": "https://checkout.paystack.com/abc123",
+    "reference": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  },
+  "_debug": {
+    "stepResults": {
+      "validate": { "valid": true },
+      "generateReference": { "value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890" },
+      "initialize": {
+        "authorization_url": "https://checkout.paystack.com/abc123",
+        "reference": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      }
+    }
+  }
+}
+```
+
+When debug mode is **off** (default), the `_debug` key is completely absent — zero overhead and no payload pollution.
+
+> **Note:** Debug mode works for both local workflow execution (`flosync.run()`) and remote execution via `client.workflows.run()` / `client.workflows.runByWebhook()`.
+
 ## Encryption
 
 Use `s.encrypt(connectorId, action, config)` with built-in encryption connectors. All use Node `crypto`; Argon2 and bcrypt require optional packages.
@@ -784,6 +1284,143 @@ import { defineCustomConnectorFromList } from 'cliodot';
 
 const MyStore = defineCustomConnectorFromList('my.store', ['login', 'listItems', 'createItem']);
 ```
+
+### Typed connectors (for remote connectors)
+
+When using remote connectors, you do not have the implementation locally. `defineTypedConnector` lets you define per-action schema so TypeScript can infer request/response shapes across decorators, builder calls, and `runConnector`.
+
+```typescript
+import { defineTypedConnector } from "cliodot";
+
+const Paystack = defineTypedConnector("paystack", {
+  initializeTransaction: "Initialize Transaction",
+  verifyTransaction: "Verify Transaction",
+  listTransactions: "List Transactions",
+}, {
+  initializeTransaction: {
+    body: {} as { email: string; amount: number; reference?: string; callback_url?: string },
+    headers: {} as { "Idempotency-Key"?: string },
+    vars: {} as { traceId?: string },
+    response: {} as { authorization_url: string; access_code: string; reference: string },
+  },
+  verifyTransaction: {
+    pathParams: {} as { reference: string },
+    response: {} as { status: string; amount: number; currency: string; paid_at: string },
+  },
+  listTransactions: {
+    params: {} as { page?: number; perPage?: number; status?: string },
+    response: {} as { data: Array<{ reference: string; amount: number; status: string }> },
+  },
+});
+```
+
+Schema fields:
+
+| Field | Description |
+|-------|-------------|
+| `body` | Shape of request body |
+| `params` | Shape of query/params |
+| `pathParams` | Shape of URL path params |
+| `headers` | Shape of custom headers |
+| `vars` | Shape of step-level vars merged before execution |
+| `response` | Shape of expected response |
+
+Use `{} as YourType` to define each shape without runtime values.
+
+**Extracting types with helper utilities:**
+
+```typescript
+import type {
+  ConnectorBody,
+  ConnectorParams,
+  ConnectorPathParams,
+  ConnectorHeaders,
+  ConnectorVars,
+  ConnectorResponse,
+} from "cliodot";
+
+type InitBody = ConnectorBody<typeof Paystack, "initializeTransaction">;
+type InitHeaders = ConnectorHeaders<typeof Paystack, "initializeTransaction">;
+type InitVars = ConnectorVars<typeof Paystack, "initializeTransaction">;
+type VerifyPath = ConnectorPathParams<typeof Paystack, "verifyTransaction">;
+type ListParams = ConnectorParams<typeof Paystack, "listTransactions">;
+type VerifyResponse = ConnectorResponse<typeof Paystack, "verifyTransaction">;
+```
+
+**Using in decorators (typed action key + typed config):**
+
+```typescript
+import { Workflow, Http, Connector, Responder, v } from "cliodot";
+import type { WorkflowContext, StepOutput, ConnectorResponse } from "cliodot";
+
+type InitResponse = ConnectorResponse<typeof Paystack, "initializeTransaction">;
+
+@Workflow("paystack-init", "Initialize Paystack Payment")
+@Http("POST", "/pay")
+class PaystackInitWorkflow {
+  @Connector(
+    Paystack,
+    "initializeTransaction",
+    {
+      body: { email: v.body("email"), amount: v.body("amount"), callback_url: v.body("callback_url") },
+      headers: { "Idempotency-Key": "{{ trigger.idempotencyKey }}" },
+      vars: { traceId: "{{ trigger.traceId }}" },
+    },
+    { order: 0, stage: "post" }
+  )
+  init(ctx: WorkflowContext<InitResponse>): StepOutput<{ url: string; ref: string }> {
+    return {
+      out: {
+        url: ctx.input.authorization_url,
+        ref: ctx.input.reference,
+      },
+    };
+  }
+
+  @Responder("json", {
+    body: { url: v.stepResult("init", "url"), reference: v.stepResult("init", "ref") },
+  }, { order: 1 })
+  respond() {}
+}
+```
+
+You can still use the classic style (`Paystack.id` + `Paystack.actions.someAction`) if you prefer.
+
+**Typed connectors also work in builder and direct runs:**
+
+```typescript
+// Builder
+workflow.step("init", (s) =>
+  s.connector(Paystack, "initializeTransaction", {
+    body: { email: "{{ trigger.email }}", amount: "{{ trigger.amount }}" },
+    headers: { "Idempotency-Key": "{{ trigger.idempotencyKey }}" },
+  })
+);
+
+// Direct connector execution
+await flosync.runConnector(Paystack, "verifyTransaction", {
+  pathParams: { reference: "ref_123" },
+});
+```
+
+Template strings are accepted in typed request fields (`body`, `params`, `pathParams`, `headers`, `vars`) so workflow expressions continue to work with strong typing.
+
+Available type helpers:
+
+| Helper | Description |
+|--------|-------------|
+| `ConnectorBody<TDef, TAction>` | Extracts `body` type |
+| `ConnectorParams<TDef, TAction>` | Extracts `params` type |
+| `ConnectorPathParams<TDef, TAction>` | Extracts `pathParams` type |
+| `ConnectorHeaders<TDef, TAction>` | Extracts `headers` type |
+| `ConnectorVars<TDef, TAction>` | Extracts `vars` type |
+| `ConnectorResponse<TDef, TAction>` | Extracts `response` type |
+| `ConnectorActionRequest<TDef, TAction>` | Extracts full request shape |
+| `ConnectorTypedRequestConfig<TDef, TAction>` | Typed decorator/builder request config |
+
+Examples-first guide:
+
+- [`Typed Connector End-to-End Samples`](./TYPED_CONNECTOR_EXAMPLES.md)
 
 ## Connectors by ID
 

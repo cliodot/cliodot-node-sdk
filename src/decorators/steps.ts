@@ -1,11 +1,13 @@
 import type { DbAction, DbEngine, EncryptionAction, EncryptionConnectorId, ResponderType } from "../types/builtin";
 import type {
   AuthAction,
+  AuthActionForConnector,
+  AuthConfigFor,
   AuthConnectorId,
   UtilityAction,
   UtilityConnectorId,
 } from "../types/builtin";
-import type { IWorkflowStep } from "../types/workflow";
+import type { IWorkflowStep, ValidationRule } from "../types/workflow";
 import {
   getOrCreateWorkflowMeta,
   makeAuthStep,
@@ -14,6 +16,7 @@ import {
   makeCodeStep,
   makeConnectorStep,
   makeConditionStep,
+  makeCustomStep,
   makeDelayStep,
   makeDbStep,
   makeEncryptStep,
@@ -24,20 +27,74 @@ import {
   makeTransformStep,
   makeValidatorStep,
   type StepDecoratorOptions,
+  type ConnectorStepConfig,
 } from "./metadata";
 import type { StepFactory } from "./metadata";
+import {
+  isTypedConnectorDef,
+  isCustomConnectorDef,
+  type TypedConnectorDef,
+  type CustomConnectorDef,
+  type ConnectorTypedRequestConfig,
+  type ConnectorActionSchema,
+} from "../connectors/registry";
 
+export function Connector<
+  TActions extends Record<string, string>,
+  TSchemas extends Record<string, ConnectorActionSchema>,
+  TKey extends keyof TActions,
+>(
+  connectorDef: TypedConnectorDef<TActions, TSchemas>,
+  actionKey: TKey,
+  config?: ConnectorTypedRequestConfig<TypedConnectorDef<TActions, TSchemas>, TKey>,
+  options?: StepDecoratorOptions
+): (target: unknown, propertyKey: string) => void;
+export function Connector<TActions extends Record<string, string>>(
+  connectorDef: CustomConnectorDef<TActions>,
+  actionKey: keyof TActions,
+  config?: ConnectorStepConfig,
+  options?: StepDecoratorOptions
+): (target: unknown, propertyKey: string) => void;
 export function Connector(
   connectorId: string,
   action: string,
-  config: Record<string, any> = {},
+  config?: ConnectorStepConfig,
+  options?: StepDecoratorOptions
+): (target: unknown, propertyKey: string) => void;
+export function Connector(
+  connectorIdOrDef: string | TypedConnectorDef<any, any> | CustomConnectorDef<any>,
+  actionOrKey: any,
+  config?: any,
   options: StepDecoratorOptions = {}
 ) {
+  const resolved = (config ?? {}) as ConnectorStepConfig;
   return function (target: any, propertyKey: string) {
     const meta = getOrCreateWorkflowMeta(target.constructor);
     const stepId = options.id ?? propertyKey;
     const orderKey = options.order ?? meta.steps.length;
-    const factory: StepFactory = (id) => makeConnectorStep(id, connectorId, action, config);
+    let connectorId: string;
+    let action: string;
+    if (isTypedConnectorDef(connectorIdOrDef)) {
+      connectorId = connectorIdOrDef.id;
+      const key = actionOrKey as keyof typeof connectorIdOrDef.actions;
+      const mapped = connectorIdOrDef.actions[key];
+      if (typeof mapped !== "string") {
+        throw new Error(`Unknown action key on connector ${connectorId}: ${String(actionOrKey)}`);
+      }
+      action = mapped;
+    } else if (isCustomConnectorDef(connectorIdOrDef)) {
+      connectorId = connectorIdOrDef.id;
+      const key = actionOrKey as keyof typeof connectorIdOrDef.actions;
+      const mapped = connectorIdOrDef.actions[key];
+      if (typeof mapped !== "string") {
+        throw new Error(`Unknown action key on connector ${connectorId}: ${String(actionOrKey)}`);
+      }
+      action = mapped;
+    } else {
+      connectorId = connectorIdOrDef as string;
+      action = actionOrKey;
+    }
+    const factory: StepFactory = (id) => makeConnectorStep(id, connectorId, action, resolved);
     meta.steps.push({ stepId, methodKey: propertyKey, orderKey, stage: options.stage, then: options.then, else: options.else, factory });
   };
 }
@@ -45,7 +102,7 @@ export function Connector(
 export function Util(
   connectorId: UtilityConnectorId,
   action: UtilityAction,
-  config: Record<string, any> = {},
+  config: ConnectorStepConfig = {} as ConnectorStepConfig,
   options: StepDecoratorOptions = {}
 ) {
   return Connector(connectorId, action, config, options) as any;
@@ -71,7 +128,7 @@ export function Validator(
     | Record<string, string>
     | Array<{
         fields: string[];
-        validators: Array<{ name: string; config?: Record<string, any> }>;
+        validators: Array<ValidationRule>;
       }>,
   options: StepDecoratorOptions = {}
 ) {
@@ -107,6 +164,15 @@ export function Transform(
   };
 }
 
+export function Auth<
+  TConnectorId extends AuthConnectorId,
+  TAction extends AuthActionForConnector<TConnectorId>,
+>(
+  connectorId: TConnectorId,
+  action: TAction,
+  config: AuthConfigFor<TConnectorId, TAction>,
+  options?: StepDecoratorOptions
+): (target: unknown, propertyKey: string) => void;
 export function Auth(
   connectorId: AuthConnectorId,
   action: AuthAction,
@@ -243,6 +309,32 @@ export function Notify(channel: string, message: string, options: StepDecoratorO
     const orderKey = options.order ?? meta.steps.length;
     const factory: StepFactory = (id) => makeNotifyStep(id, channel, message);
     meta.steps.push({ stepId, methodKey: propertyKey, orderKey, stage: options.stage, then: options.then, else: options.else, factory });
+  };
+}
+
+/**
+ * Generic step decorator for custom user-defined logic.
+ *
+ * The method body is extracted at build time and executed as a code step.
+ * The method receives a typed `WorkflowContext` and should return a `StepOutput<T>`.
+ *
+ * @example
+ * ```ts
+ * @Step({ order: 0 })
+ * processData(ctx: WorkflowContext<{ todos: Todo[] }>): StepOutput<{ sorted: Todo[] }> {
+ *   const sorted = [...ctx.input.todos].sort((a, b) => a.id - b.id);
+ *   return { out: { sorted } };
+ * }
+ * ```
+ */
+export function Step(options: StepDecoratorOptions = {}) {
+  return function (target: any, propertyKey: string) {
+    const meta = getOrCreateWorkflowMeta(target.constructor);
+    const stepId = options.id ?? propertyKey;
+    const orderKey = options.order ?? meta.steps.length;
+    const stage = options.stage ?? "post";
+    const factory: StepFactory = (id) => makeCustomStep(id);
+    meta.steps.push({ stepId, methodKey: propertyKey, orderKey, stage, then: options.then, else: options.else, factory });
   };
 }
 

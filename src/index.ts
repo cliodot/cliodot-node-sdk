@@ -7,10 +7,29 @@ export {
   ConnectorActions,
   defineCustomConnector,
   defineCustomConnectorFromList,
+  defineTypedConnector,
   getConnectorActions,
   listBuiltInConnectors,
+  isTypedConnectorDef,
 } from "./connectors/registry";
-export type { CustomConnectorDef, BuiltInConnectorId } from "./connectors/registry";
+export type {
+  CustomConnectorDef,
+  BuiltInConnectorId,
+  TypedConnectorDef,
+  ConnectorActionSchema,
+  ConnectorActionSchemaMap,
+  ConnectorBody,
+  ConnectorParams,
+  ConnectorPathParams,
+  ConnectorResponse,
+  ConnectorHeaders,
+  ConnectorVars,
+  ConnectorActionRequest,
+  ConnectorTypedRequestConfig,
+  ConnectorRunOptionsTyped,
+  WireValue,
+  WireRecord,
+} from "./connectors/registry";
 export { FlosyncClient, DEFAULT_CLIODOT_BASE_URL } from "./FlosyncClient";
 export type { FlosyncClientConfig } from "./FlosyncClient";
 export { CliodotApiError } from "./errors";

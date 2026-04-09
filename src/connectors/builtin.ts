@@ -84,7 +84,10 @@ export const bearerAuthConnector = {
   name: "Bearer Auth",
   meta: { category: "authentication" },
   auth: { type: "bearer" },
-  actions: [{ id: "bearer.validate", name: "Validate" }],
+  actions: [
+    { id: "bearer.create", name: "Create" },
+    { id: "bearer.validate", name: "Validate" },
+  ],
 };
 
 export const apiKeyAuthConnector = {
@@ -93,7 +96,34 @@ export const apiKeyAuthConnector = {
   name: "API Key",
   meta: { category: "authentication" },
   auth: { type: "api_key" },
-  actions: [{ id: "api_key.validate", name: "Validate" }],
+  actions: [
+    { id: "api_key.create", name: "Create" },
+    { id: "api_key.validate", name: "Validate" },
+  ],
+};
+
+export const basicAuthConnector = {
+  _id: "basic.system",
+  type: "system",
+  name: "Basic Auth",
+  meta: { category: "authentication" },
+  auth: { type: "basic" },
+  actions: [
+    { id: "basic.create", name: "Create" },
+    { id: "basic.validate", name: "Validate" },
+  ],
+};
+
+export const customHeaderAuthConnector = {
+  _id: "custom_header.system",
+  type: "system",
+  name: "Custom Header Auth",
+  meta: { category: "authentication" },
+  auth: { type: "custom_header" },
+  actions: [
+    { id: "custom_header.create", name: "Create" },
+    { id: "custom_header.validate", name: "Validate" },
+  ],
 };
 
 export const dateTimeUtilityConnector = {

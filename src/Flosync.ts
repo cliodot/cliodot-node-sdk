@@ -6,6 +6,12 @@ import { ProcessorEngine } from "./runner/ProcessorEngine";
 import { createCliodotConnector } from "./connectors/builtin";
 import { FlosyncClient } from "./FlosyncClient";
 import { buildWorkflowFromClass } from "./decorators/build";
+import {
+  isTypedConnectorDef,
+  type TypedConnectorDef,
+  type ConnectorRunOptionsTyped,
+  type ConnectorActionSchema,
+} from "./connectors/registry";
 
 export interface FlosyncConfig {
   apiKey?: string;
@@ -17,6 +23,7 @@ export interface FlosyncConfig {
   cliodot?: { baseUrl: string; apiKey: string };
   tokenRefreshMarginMs?: number;
   tokenFallbackReuseMs?: number;
+  debug?: boolean;
 }
 
 export class Flosync {
@@ -42,6 +49,7 @@ export class Flosync {
           apiSecret: this.config.apiSecret!,
           tokenRefreshMarginMs: this.config.tokenRefreshMarginMs,
           tokenFallbackReuseMs: this.config.tokenFallbackReuseMs,
+          debug: this.config.debug,
         });
       }
     }
@@ -98,6 +106,7 @@ export class Flosync {
       const runner = (this as any).runner;
       if (!runner) throw new Error("LocalRunner not initialized. Call flosync.configure() first.");
       const normalized = this.normalizeRunPayload(payload);
+      if (this.config.debug) normalized.debug = true;
       return runner.runWorkflow(workflow, normalized);
     }
     const client = this.getClient();
@@ -127,6 +136,16 @@ export class Flosync {
     return client.functions.invoke(functionId, args);
   }
 
+  async runConnector<
+    TActions extends Record<string, string>,
+    TSchemas extends Record<string, ConnectorActionSchema>,
+    TKey extends keyof TActions,
+  >(
+    connectorDef: TypedConnectorDef<TActions, TSchemas>,
+    actionKey: TKey,
+    options?: ConnectorRunOptionsTyped<TypedConnectorDef<TActions, TSchemas>, TKey>,
+    runOptions?: { remote?: boolean }
+  ): Promise<any>;
   async runConnector(
     connectorId: string,
     action: string,
@@ -142,7 +161,34 @@ export class Flosync {
       vars?: Record<string, any>;
     },
     runOptions?: { remote?: boolean }
+  ): Promise<any>;
+  async runConnector(
+    connectorIdOrDef: string | TypedConnectorDef<any, any>,
+    actionOrKey: string,
+    options?: {
+      body?: Record<string, any>;
+      params?: Record<string, any>;
+      pathParams?: Record<string, any>;
+      headers?: Record<string, string>;
+      installation_id?: string;
+      database?: string;
+      connection_id?: string;
+      timeout?: number;
+      vars?: Record<string, any>;
+    },
+    runOptions?: { remote?: boolean }
   ): Promise<any> {
+    if (isTypedConnectorDef(connectorIdOrDef)) {
+      const def = connectorIdOrDef;
+      const key = actionOrKey as keyof typeof def.actions;
+      const mapped = def.actions[key];
+      if (typeof mapped !== "string") {
+        throw new Error(`Unknown connector action key: ${String(actionOrKey)}`);
+      }
+      return this.runConnector(def.id, mapped, options, runOptions);
+    }
+    const connectorId = connectorIdOrDef as string;
+    const action = actionOrKey;
     const connector = this.connectors.get(connectorId);
     if (connector && (runOptions?.remote ?? false) === false) {
       const runner = (this as any).runner;

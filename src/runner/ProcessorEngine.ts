@@ -60,6 +60,8 @@ import {
   redisConnector,
   bearerAuthConnector,
   apiKeyAuthConnector,
+  basicAuthConnector,
+  customHeaderAuthConnector,
   dateTimeUtilityConnector,
   stringUtilityConnector,
   randomUtilityConnector,
@@ -74,6 +76,48 @@ import {
   passwordEncryptionConnector,
 } from "../connectors/builtin";
 import { IWorkflow, IWorkflowStep, WorkflowStepType } from "../types/workflow";
+
+function parseHttpErrorResponseData(data: unknown): unknown {
+  if (data === undefined || data === null) return data;
+  if (typeof data === "object") return data;
+  if (typeof data === "string") {
+    const t = data.trim();
+    if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
+      try {
+        return JSON.parse(t);
+      } catch {
+        return data;
+      }
+    }
+    return data;
+  }
+  return data;
+}
+
+function buildHttpStepFailurePayload(err: any): Record<string, any> {
+  const res = err?.response;
+  const parsed = parseHttpErrorResponseData(res?.data);
+  const message = err?.message || String(err);
+  const out: Record<string, any> = {
+    ok: false,
+    message,
+  };
+  if (res && typeof res.status === "number") {
+    out.status = res.status;
+    if (res.statusText) out.statusText = res.statusText;
+  }
+  if (parsed !== undefined) {
+    out.data = parsed;
+  }
+  if (parsed && typeof parsed === "object" && parsed !== null && typeof (parsed as any).message === "string") {
+    out.error = (parsed as any).message;
+  } else if (typeof parsed === "string" && parsed) {
+    out.error = parsed;
+  } else {
+    out.error = message;
+  }
+  return out;
+}
 
 export interface RunState {
   workflow: IWorkflow;
@@ -131,6 +175,8 @@ export class ProcessorEngine {
       "redis.system": redisConnector,
       "bearer.system": bearerAuthConnector,
       "api_key.system": apiKeyAuthConnector,
+      "basic.system": basicAuthConnector,
+      "custom_header.system": customHeaderAuthConnector,
       "utility.date_time": dateTimeUtilityConnector,
       "utility.string": stringUtilityConnector,
       "utility.random": randomUtilityConnector,
@@ -297,7 +343,13 @@ export class ProcessorEngine {
               options.body = await renderBodyRecursive(config.body, state);
             }
             const resp = await executeConnectorAction(connector, "json.respond", options, state);
-            if (resp?.terminate) return resp;
+            if (resp?.terminate) {
+              const isDebug = triggerPayload?.debug === true || String(state.headers?.["x-flosync-debug"]) === "true" || String(triggerPayload?.query?.debug) === "true";
+              if (isDebug && resp.body && typeof resp.body === "object") {
+                resp.body._debug = { stepResults: state.stepResults };
+              }
+              return resp;
+            }
           }
           const nextIdx = findNextStepIndex(step);
           currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
@@ -461,6 +513,12 @@ export class ProcessorEngine {
             trigger: state.trigger,
             steps: state.stepResults,
             vars: state.vars,
+            headers: state.headers,
+            params: state.params,
+            pathParams: state.pathParams,
+            query: state.query,
+            body: state.body,
+            env: state.env,
           };
 
           let result: any = null;
@@ -486,10 +544,69 @@ export class ProcessorEngine {
           continue;
         }
 
+        if ((step as any).type === "custom" || step.type === WorkflowStepType.CUSTOM) {
+          const customStep = step as any;
+          const input =
+            customStep.input_from
+              ? state.stepResults[customStep.input_from]?.result ??
+                state.stepResults[customStep.input_from]?.output ??
+                state.stepResults[customStep.input_from] ??
+                {}
+              : state.trigger?.data ?? state.trigger ?? {};
+
+          const ctxForCustom = {
+            input,
+            trigger: state.trigger,
+            steps: state.stepResults,
+            vars: state.vars,
+            headers: state.headers,
+            params: state.params,
+            pathParams: state.pathParams,
+            query: state.query,
+            body: state.body,
+            env: state.env,
+          };
+
+          let result: any = null;
+          const source = customStep.post_source || customStep.source;
+          if (source) {
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as any;
+            const userFn = new AsyncFunction("ctx", "platform", source);
+            result = await userFn(ctxForCustom, {});
+          }
+
+          if (result && typeof result === "object" && result.setVars && typeof result.setVars === "object") {
+            for (const k of Object.keys(result.setVars)) {
+              state.vars[k] = result.setVars[k];
+            }
+          }
+
+          state.stepResults[step.id] = result?.out ?? result ?? {};
+
+          if (isResultFailure(state.stepResults[step.id])) {
+            if (checkAndJumpToErrorBranch(step)) continue;
+            const nextIdx = findNextStepIndex(step);
+            currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
+            continue;
+          }
+          if (checkAndJumpToSuccessBranch(step)) continue;
+          const nextIdx = findNextStepIndex(step);
+          currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
+          continue;
+        }
+
         if (step.type === WorkflowStepType.API_CALL) {
           const apiStep = step as any;
           const connector = await this.getConnectorOrFetch(apiStep.connector_id);
           if (!connector) throw new Error("connector not found: " + apiStep.connector_id);
+          if (apiStep.vars && typeof apiStep.vars === "object" && !Array.isArray(apiStep.vars)) {
+            const merged = { ...state.vars };
+            for (const [k, v] of Object.entries(apiStep.vars)) {
+              merged[k] =
+                typeof v === "string" && v.includes("{{") ? await renderTemplate(v, state) : v;
+            }
+            state.vars = merged;
+          }
           let body = apiStep.body || {};
           if (typeof body === "object") body = JSON.parse(await renderTemplate(JSON.stringify(body), state));
           else if (typeof body === "string") body = await renderTemplate(body, state);
@@ -505,7 +622,32 @@ export class ProcessorEngine {
               ? await renderTemplate((apiStep.params as any)[k], state)
               : (apiStep.params as any)[k];
           }
-          const resp = await executeConnectorAction(connector, apiStep.action, { params, pathParams, body }, state);
+          const headers: Record<string, any> = {};
+          const stepHeaders = apiStep.headers;
+          if (stepHeaders) {
+            if (typeof stepHeaders === "object" && !Array.isArray(stepHeaders)) {
+              for (const [key, value] of Object.entries(stepHeaders)) {
+                headers[key] =
+                  typeof value === "string" && (value as string).includes("{{")
+                    ? await renderTemplate(value as string, state)
+                    : value;
+              }
+            } else if (Array.isArray(stepHeaders)) {
+              for (const h of stepHeaders) {
+                if (h?.key && h?.value !== undefined) {
+                  headers[h.key] =
+                    typeof h.value === "string" && h.value.includes("{{")
+                      ? await renderTemplate(h.value, state)
+                      : h.value;
+                }
+              }
+            }
+          }
+          const execOpts: Record<string, any> = { params, pathParams, body };
+          if (Object.keys(headers).length > 0) execOpts.headers = headers;
+          if (apiStep.timeout != null) execOpts.timeout = apiStep.timeout;
+          if (apiStep.files) execOpts.files = apiStep.files;
+          const resp = await executeConnectorAction(connector, apiStep.action, execOpts, state);
           if (resp?.terminate) return resp;
           const normalResp = resp as { mapped?: any; raw?: any };
           state.stepResults[step.id] = normalResp?.mapped ?? normalResp?.raw ?? null;
@@ -835,8 +977,9 @@ export class ProcessorEngine {
         const nextIdx = findNextStepIndex(step);
         currentStepIndex = nextIdx >= 0 ? nextIdx : -1;
       } catch (err: any) {
-        state.stepResults[step.id] = { error: err.message, ok: false };
-        state.stepErrors[step.id] = { error: err.message };
+        const fail = buildHttpStepFailurePayload(err);
+        state.stepResults[step.id] = fail;
+        state.stepErrors[step.id] = fail;
         if (checkAndJumpToErrorBranch(step)) continue;
         const nextIdx = findNextStepIndex(step);
         if (nextIdx >= 0) {
@@ -897,7 +1040,13 @@ export class ProcessorEngine {
         };
         options.body = await renderBodyRecursive(options.body, ctx);
         const resp = await executeConnectorAction(connector, "json.respond", options, state);
-        if (resp?.terminate) return { ok: true, data: resp.body, stepResults: state.stepResults };
+        if (resp?.terminate) {
+          const isDebug = args?.debug === true || String(state.headers?.["x-flosync-debug"]) === "true";
+          if (isDebug && resp.body && typeof resp.body === "object") {
+            resp.body._debug = { stepResults: state.stepResults };
+          }
+          return { ok: true, data: resp.body, stepResults: state.stepResults };
+        }
       }
       if (step.type === "validator" || (step as any).type === WorkflowStepType.VALIDATOR) {
         const valStep = step as any;
@@ -956,9 +1105,57 @@ export class ProcessorEngine {
         const apiStep = step as any;
         const connector = await this.getConnectorOrFetch(apiStep.connector_id);
         if (!connector) throw new Error("connector not found: " + apiStep.connector_id);
+        if (apiStep.vars && typeof apiStep.vars === "object" && !Array.isArray(apiStep.vars)) {
+          const merged = { ...state.vars };
+          for (const [k, v] of Object.entries(apiStep.vars)) {
+            merged[k] =
+              typeof v === "string" && v.includes("{{") ? await renderTemplate(v, state) : v;
+          }
+          state.vars = merged;
+        }
         let body = apiStep.body || {};
-        if (typeof body === "object") body = JSON.parse(await renderTemplate(JSON.stringify(body), ctx));
-        const resp = await executeConnectorAction(connector, apiStep.action, { params: apiStep.params, body }, state);
+        if (typeof body === "object") body = JSON.parse(await renderTemplate(JSON.stringify(body), state));
+        else if (typeof body === "string") body = await renderTemplate(body, state);
+        const pathParams: Record<string, any> = {};
+        for (const k of Object.keys(apiStep.pathParams || {})) {
+          pathParams[k] =
+            typeof (apiStep.pathParams as any)[k] === "string" && (apiStep.pathParams as any)[k].includes("{{")
+              ? await renderTemplate((apiStep.pathParams as any)[k], state)
+              : (apiStep.pathParams as any)[k];
+        }
+        const params: Record<string, any> = {};
+        for (const k of Object.keys(apiStep.params || {})) {
+          params[k] =
+            typeof (apiStep.params as any)[k] === "string" && (apiStep.params as any)[k].includes("{{")
+              ? await renderTemplate((apiStep.params as any)[k], state)
+              : (apiStep.params as any)[k];
+        }
+        const headers: Record<string, any> = {};
+        const stepHeaders = apiStep.headers;
+        if (stepHeaders) {
+          if (typeof stepHeaders === "object" && !Array.isArray(stepHeaders)) {
+            for (const [key, value] of Object.entries(stepHeaders)) {
+              headers[key] =
+                typeof value === "string" && (value as string).includes("{{")
+                  ? await renderTemplate(value as string, state)
+                  : value;
+            }
+          } else if (Array.isArray(stepHeaders)) {
+            for (const h of stepHeaders) {
+              if (h?.key && h?.value !== undefined) {
+                headers[h.key] =
+                  typeof h.value === "string" && h.value.includes("{{")
+                    ? await renderTemplate(h.value, state)
+                    : h.value;
+              }
+            }
+          }
+        }
+        const execOpts: Record<string, any> = { params, pathParams, body };
+        if (Object.keys(headers).length > 0) execOpts.headers = headers;
+        if (apiStep.timeout != null) execOpts.timeout = apiStep.timeout;
+        if (apiStep.files) execOpts.files = apiStep.files;
+        const resp = await executeConnectorAction(connector, apiStep.action, execOpts, state);
         if (resp?.terminate) return { ok: true, data: resp.body, stepResults: state.stepResults };
         state.stepResults[step.id] = (resp as any)?.mapped ?? (resp as any)?.raw ?? null;
       }

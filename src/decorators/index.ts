@@ -1,4 +1,9 @@
-export type { StepDecoratorOptions } from "./metadata";
+export type {
+  StepDecoratorOptions,
+  ConnectorStepConfig,
+  ConnectorStepHeaders,
+  ConnectorStepHeaderValue,
+} from "./metadata";
 
 export { Workflow, Http, Webhook, Job, Schedule } from "./workflow";
 export {
@@ -18,6 +23,7 @@ export {
   Log,
   Delay,
   Notify,
+  Step,
 } from "./steps";
-export { buildWorkflowFromClass } from "./build";
-
+export { ConnectorClass, ActionEndpoint, ActionCustom } from "./connector";
+export { buildWorkflowFromClass, buildConnectorFromClass } from "./build";
