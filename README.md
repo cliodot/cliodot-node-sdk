@@ -79,7 +79,8 @@ Pass a `body` (or plain object) as the trigger; the engine treats it as `trigger
 | Field | Description |
 |-------|-------------|
 | `body` / `data` | Request body; use `v.body('account')`, `v.body('email')` |
-| `headers` | HTTP headers (`v.header('x-api-key')`) |
+| `headers` | Simulated HTTP headers for the run (`v.header('x-api-key')`); merged with `executionHeaders` (see below) |
+| `executionHeaders` | Extra headers merged after `headers` (same sanitization); useful to separate trigger data from auth headers |
 | `pathParams` | Route params (`v.pathParam('id')`) |
 | `params` | Extra params (`v.param('page')`) |
 | `query` | Query string params (`v.query('filter')`) |
@@ -90,6 +91,32 @@ Pass a `body` (or plain object) as the trigger; the engine treats it as `trigger
 flosync.run('my-workflow', { body: { id: 1 } });
 flosync.run('my-workflow', { body: { id: 1 }, headers: { 'x-request-id': 'abc' }, pathParams: { id: '123' }, query: { page: 1 } });
 ```
+
+### Execution headers (local and remote)
+
+Workflow steps read `state.headers` (for example `v.header('authorization')`). You control what appears there via the run payload and, for remote runs, the client options below.
+
+Local runs (`flosync.run` with a registered workflow): `headers` and `executionHeaders` on the payload are merged (after sanitization) into `state.headers`. You can also pass `executionHeaders` as the third argument to `flosync.run`, which merges on top of the payload.
+
+```javascript
+await flosync.run('my-workflow', { body: { id: 1 }, headers: { 'x-request-id': 'a' } }, {
+  executionHeaders: { authorization: `Bearer ${integrationToken}` },
+});
+```
+
+Remote runs (`flosync.run` / `flosync.runById` with `apiKey` and `apiSecret`, or `FlosyncClient`): the SDK sends its own `Authorization` header to the Cliodot API (session JWT). That value is not copied into the workflow `state.headers`, since it is not the same credential your integration steps expect.
+
+To give the server workflow the bearer or other headers it was designed for, pass them explicitly:
+
+- In the payload: `headers` or `executionHeaders` on the object you pass to `run` / `runById` (both are merged into the test payload the API receives).
+- On the client: `client.workflows.run(groupId, triggerId, { payload, executionHeaders })` — `executionHeaders` is sent in the JSON body and merged last on the server.
+- Webhook test: `client.workflows.runByWebhook(path, method, { body, executionHeaders })`.
+
+Merge order on the server is: sanitized real incoming HTTP headers (transport), then `payload.headers`, then `executionHeaders` from the body. Later keys win. Cookies, hop-by-hop headers, `sec-*`, `proxy-*`, and `proxy-authorization` are dropped from user-supplied maps. `authorization` is allowed in `headers` / `executionHeaders` so you can supply an integration bearer; it is still stripped from the raw request line so the Cliodot session token does not overwrite your value.
+
+`sanitizeExecutionHeaders` is exported if you want to preview what will be sent; the same rules apply on the server.
+
+Public webhooks (unauthenticated URL): the server does not apply an `executionHeaders` field from the JSON body for merging. Use normal request headers or put values in the webhook payload and map them in the workflow.
 
 ## Configuration
 
@@ -157,10 +184,46 @@ s.validator({ amount: v.body('amount'), email: v.body('email') });
 s.transform({ total: v.stepResult('calculate', 'total'), id: v.stepResult('charge', 'id') });
 ```
 
+### Typed `stepResult` paths (`defineStepVars`)
+
+`v.stepResult(stepId, ...pathParts)` treats every segment as a plain `string`, so your editor cannot suggest valid fields from a connector response or from another step’s output.
+
+Use **`defineStepVars`** to describe, once per workflow file, a map from **step id** (the decorated **method name**) to that step’s **result type**. The returned **`stepResult`** then constrains the first argument to those keys and each following argument to the next key along a valid path into that type (nested objects supported up to a fixed depth). Import **`ConnectorResponse`** (and your **`defineTypedConnector`** value) so connector steps reuse the same response shape you already declared for typing.
+
+```typescript
+import { defineStepVars, v, defineTypedConnector } from "cliodot";
+import type { ConnectorResponse } from "cliodot";
+
+const Api = defineTypedConnector("my-api", { pay: "pay" }, {
+  pay: {
+    body: {} as { amount: number },
+    response: { status: "", data: { id: "", link: "" } },
+  },
+});
+
+const steps = defineStepVars<{
+  pay: ConnectorResponse<typeof Api, "pay">;
+  validate: { errors?: Record<string, unknown> };
+}>();
+
+steps.stepResult("pay", "data", "link");
+steps.stepResult("validate", "errors");
+```
+
+The type **`StepKeyPath<T>`** is exported if you want to reuse the path-tuple logic elsewhere. Plain **`v.stepResult`** remains available for ad hoc strings and for code that does not need completions.
+
+### Class decorators (`buildWorkflowFromClass`)
+
+For `@Connector`, you can target a connector that exists only on Flowsync in three ways: pass the published connector id and action as strings (`@Connector('my-connector', 'charge', { installation_id: '...', connector_version: '1.2.0' })`); use `defineCustomConnector` / `defineCustomConnectorFromList` with that same id; or use `defineRemoteConnectorRef('my-connector', { pay: 'charge' })` and `@Connector(MyRef, 'pay', config)` for a clearer name. With `apiKey` and `apiSecret` set, the local runner loads REST definitions through `client.connectors.get` and respects `connector_version` on the step when fetching.
+
+**`@CallWorkflow` by webhook path** — Use `@CallWorkflow({ webhookPath: '/orders', webhookMethod: 'POST' }, payload)` where `webhookPath` and `webhookMethod` match the child workflow’s HTTP trigger (same values as `@Http('POST', '/orders')` on that workflow). You do **not** pass a workflow group id for this mode: the platform finds the child by path and method for the tenant. When the local runner calls Flowsync with `apiKey` / `apiSecret`, it uses **`POST /workflows/test/webhook`** with a JSON body `{ webhookPath, webhookMethod, payload, ... }` (`client.workflows.runByWebhook`). On the server, `call_workflow` resolves the child the same way as a real webhook (including route patterns) and merges path params into the child’s `pathParams`. The second decorator argument is the child payload; optional fields on that object include `environment` (`dev` / `prod`), `executionHeaders`, and `remote: true` to skip the in-memory registry and always hit the API. `webhookPath` / `webhookMethod` may be templated with `{{ }}` and are rendered before lookup.
+
+**`@CallWorkflow` by group id** — `@CallWorkflow('my-group-id', payload)` runs the child via **`POST /workflows/:groupId/test/trigger/:triggerId`** (see `client.workflows.run`). Use this when you target a specific group and trigger explicitly. You can combine `workflow_id` with a webhook path in the serialized step only when you need both; the path-only flow above stays independent of group ids.
+
 ### Step Types
 
-- `connector(id, action, config)` - REST/API call
-- `db(engine, action, config)` - MongoDB, MySQL, PostgreSQL, or Redis
+- `connector(id, action, config)` - REST/API call (optional `connector_version` in `config` for versioned tenant connectors when syncing workflows to Flowsync)
+- `db(engine, action, config)` - MongoDB, MySQL, PostgreSQL, or Redis (optional `connector_version` when relevant)
 - `validator(fields)` - Validate input
 - `condition(expr)` - Branch on expression (use `.then()` and `.else()`)
 - `transform(mapping)` - Map or transform data
@@ -235,6 +298,10 @@ return { out: <newOutput>, setVars?: { ... } };
 The overridden output becomes the value of `v.stepResult("<stepId>")` for subsequent steps.
 
 In `stage: "post"`, `ctx.input` is the decorated step output produced by the connector/function call.
+
+#### `stage: "post"` in depth
+
+`post` is the hook that runs **after** the decorated step’s primary work finishes. For `@Connector`, `@Db`, and other steps that call out to a runtime implementation, the sequence is: resolve inputs → run the connector or database action (or built-in executor) → take the returned payload as the step output → **then** run your method body with `ctx.input` set to that output. Anything you return as `{ out }` replaces what gets stored in `stepResults` for that step id, so the rest of the workflow sees your transformed value. Use `setVars` in the same return value to publish workflow variables without changing the step output. Failures and HTTP error handling still apply to the primary step; the post hook is for normalization (mapping provider DTOs to your domain shape), redacting fields, enriching derived properties, or turning awkward API responses into a stable contract for later steps and responders. `@Step` defaults to `stage: "post"` so standalone code steps behave like “compute output from prior context” without injecting an extra predecessor code step.
 
 ### `WorkflowContext<TInput, TSteps, TVars>`
 
@@ -950,6 +1017,40 @@ await flosync.runFunctionById('function-id', { amount: 100 });
 
 If a workflow/function is registered locally, `run` / `runFunction` use the local version. If not found and the client is configured, they run remotely. Pass `{ remote: false }` to disable remote fallback.
 
+### Connector versioning (REST connectors)
+
+Tenant REST connectors can have **published semver snapshots**. The SDK and API use that version when loading connector definitions for workflow runs and for direct execute calls.
+
+**Workflow steps (fluent builder and `@Connector` config)**  
+Include an optional semver string on the step config so pushed workflows pin the same snapshot the runner expects:
+
+```typescript
+s.connector("paystack_conn_id", "initializeTransaction", {
+  connector_version: "1.2.0",
+  body: { email: v.body("email"), amount: v.body("amount") },
+});
+```
+
+Event triggers can pin the source connector the same way on the workflow object: `trigger.source_connector_id` and `trigger.source_connector_version` (see types in `IWorkflowTrigger`).
+
+**`flosync.runConnector` (remote)**  
+Pass `connector_version` in the options object. Non-owners must match their **installed** version; owners may use other published versions or `draft` per API rules.
+
+```typescript
+await flosync.runConnector(Paystack, "initializeTransaction", {
+  connector_version: "1.2.0",
+  body: { email: "a@b.com", amount: 100 },
+});
+```
+
+**`FlosyncClient`** (after `configure` with `apiKey` / `apiSecret`):
+
+- `client.connectors.get(connectorId, { semver: "1.2.0" })` or `{ version: "1.2.0" }` — same query params as the Flowsync GET connector API.
+- `client.connectors.install(connectorId, { auth, base_url, version: "latest" })` — `version` is optional (body or query on the server).
+- `client.connectors.execute(connectorId, action, { connector_version: "1.2.0", body, params, ... })` — sent as `connector_version` on the execute request body.
+
+Workflows built with `WorkflowBuilder` / decorators serialize `connector_version` onto nodes when you `workflows.push`, so pulls round-trip the field.
+
 ## Database
 
 Use `s.db(engine, action, config)` or `s.connector(connectorId, action, config)` with built-in database connectors.
@@ -1486,7 +1587,7 @@ const data = await client.connectors.execute('paystack', 'Verify Transaction', {
 | `client.workflows.pull(groupId)` | Fetch workflow as IWorkflow |
 | `client.workflows.list(options?)` | List workflow groups |
 | `client.workflows.run(groupId, triggerId, payload)` | Run by trigger ID (payload may include `environment: "dev" \| "prod"`) |
-| `client.workflows.runByWebhook(path, method, payload)` | Run by webhook path (payload may include `environment`) |
+| `client.workflows.runByWebhook(path, method, payload)` | **`POST /workflows/test/webhook`** — run the workflow whose HTTP trigger matches `path` and `method` (no group id in the request). Payload may include `environment`, `executionHeaders`, and the child body fields (merged into `payload` for the API). |
 | `client.workflows.promote(groupId)` | Promote to production |
 
 See [Workflows](../docs/WORKFLOWS.md) for full documentation. See [Building and Pushing Custom Connectors](../docs/BUILDING_CONNECTORS.md) for connectors.

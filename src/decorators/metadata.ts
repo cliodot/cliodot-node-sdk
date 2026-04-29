@@ -40,6 +40,7 @@ export type ConnectorStepConfig = {
   installation_id?: string;
   connection_id?: string;
   database?: string;
+  connector_version?: string;
 } & Record<string, unknown>;
 
 export type WorkflowDecoratorsTrigger = {
@@ -132,6 +133,7 @@ const CONNECTOR_STEP_RESERVED = new Set([
   "installation_id",
   "connection_id",
   "database",
+  "connector_version",
 ]);
 
 export function makeConnectorStep(
@@ -151,6 +153,7 @@ export function makeConnectorStep(
   const installation_id = c.installation_id;
   const connection_id = c.connection_id;
   const database = c.database;
+  const connector_version = c.connector_version;
 
   const rest: Record<string, unknown> = {};
   for (const k of Object.keys(c)) {
@@ -179,6 +182,8 @@ export function makeConnectorStep(
   if (installation_id !== undefined) step.installation_id = installation_id;
   if (connection_id !== undefined) step.connection_id = connection_id;
   if (database !== undefined) step.database = database;
+  if (connector_version !== undefined && connector_version !== "")
+    step.connector_version = String(connector_version);
   if (body !== undefined) step.body = body;
   return step;
 }
@@ -190,16 +195,20 @@ export function makeDbStep(
   config: Record<string, any>
 ): IWorkflowStep {
   const connectorId = engine === "mongodb" ? "mongodb.system" : "mysql.system";
+  const { connector_version: cvDb, connection_id, database, ...bodyPayload } = config;
   const step: any = {
     id,
     type: WorkflowStepType.DB,
     connector_id: connectorId,
     action,
-    body: config,
-    params: config.params,
+    body: bodyPayload,
+    params: bodyPayload.params,
   };
-  if (config.connection_id) step.connection_id = config.connection_id;
-  if (config.database) step.database = config.database;
+  if (connection_id) step.connection_id = connection_id;
+  if (database) step.database = database;
+  if (cvDb != null && String(cvDb).trim() !== "") {
+    step.connector_version = String(cvDb).trim();
+  }
   return step;
 }
 
@@ -294,14 +303,19 @@ export function makeAuthStep(
   action: AuthAction,
   config: Record<string, any>
 ): IWorkflowStep {
-  return {
+  const { connector_version: cvAuth, ...payload } = config;
+  const step: any = {
     id,
     type: WorkflowStepType.AUTHENTICATION,
     connector_id: connectorId,
     action,
-    params: config,
-    body: config,
-  } as any;
+    params: payload,
+    body: payload,
+  };
+  if (cvAuth != null && String(cvAuth).trim() !== "") {
+    step.connector_version = String(cvAuth).trim();
+  }
+  return step as any;
 }
 
 export function makeEncryptStep(
@@ -310,14 +324,19 @@ export function makeEncryptStep(
   action: EncryptionAction,
   config: Record<string, any>
 ): IWorkflowStep {
-  return {
+  const { connector_version: cvEnc, ...payload } = config;
+  const step: any = {
     id,
     type: WorkflowStepType.ENCRYPTION,
     connector_id: connectorId,
     action,
-    params: config,
-    body: config,
-  } as any;
+    params: payload,
+    body: payload,
+  };
+  if (cvEnc != null && String(cvEnc).trim() !== "") {
+    step.connector_version = String(cvEnc).trim();
+  }
+  return step as any;
 }
 
 export function makeCodeStep(
@@ -352,14 +371,62 @@ export function makeCallStep(id: string, functionSlugOrId: string, args: Record<
 export function makeCallWorkflowStep(
   id: string,
   workflowId: string,
-  payload?: Record<string, any>
+  payload?: Record<string, any>,
+  webhook?: { path: string; method: string }
 ): IWorkflowStep {
-  return {
+  const raw = payload ?? {};
+  const trigger_id = (raw.trigger_id ?? raw.triggerId) as string | undefined;
+  const environment = raw.environment as "dev" | "prod" | undefined;
+  const executionHeaders = (raw.executionHeaders ?? raw.execution_headers) as Record<string, string> | undefined;
+  const remote = raw.remote === true;
+  const child_workflow_name = (raw.child_workflow_name ?? raw.workflow_name) as string | undefined;
+  const rest: Record<string, any> = { ...raw };
+  for (const k of [
+    "trigger_id",
+    "triggerId",
+    "environment",
+    "executionHeaders",
+    "execution_headers",
+    "remote",
+    "child_workflow_name",
+    "workflow_name",
+    "webhook_path",
+    "webhookPath",
+    "webhook_method",
+    "webhookMethod",
+  ]) {
+    delete rest[k];
+  }
+  const wFromRaw =
+    raw.webhook_path || raw.webhookPath
+      ? {
+          path: String(raw.webhook_path ?? raw.webhookPath).trim(),
+          method: String(raw.webhook_method ?? raw.webhookMethod ?? "POST").toUpperCase(),
+        }
+      : undefined;
+  const webhookResolved = webhook?.path
+    ? { path: webhook.path.trim(), method: (webhook.method ?? "POST").toUpperCase() }
+    : wFromRaw;
+
+  const step: any = {
     id,
     type: WorkflowStepType.CALL_WORKFLOW,
-    workflow_id: workflowId,
-    payload: payload ?? {},
-  } as any;
+    payload: Object.keys(rest).length ? rest : {},
+  };
+  if (workflowId) step.workflow_id = workflowId;
+  if (webhookResolved?.path) {
+    step.webhook_path = webhookResolved.path;
+    step.webhook_method = webhookResolved.method;
+  }
+  if (!step.workflow_id && !step.webhook_path) {
+    throw new Error("CallWorkflow requires a workflow group id, or a webhook path, or both in payload");
+  }
+  if (trigger_id) step.trigger_id = trigger_id;
+  if (environment) step.environment = environment;
+  if (executionHeaders && Object.keys(executionHeaders).length > 0) step.execution_headers = executionHeaders;
+  if (remote) step.remote = true;
+  if (child_workflow_name) step.child_workflow_name = child_workflow_name;
+  return step;
 }
 
 export function makeLoopStep(

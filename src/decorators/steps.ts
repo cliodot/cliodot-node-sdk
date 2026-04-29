@@ -254,7 +254,17 @@ export function Call(
 }
 
 export function CallWorkflow(
+  webhookTarget: { webhookPath: string; webhookMethod?: string },
+  payload?: Record<string, any>,
+  options?: StepDecoratorOptions
+): (target: unknown, propertyKey: string) => void;
+export function CallWorkflow(
   workflowId: string,
+  payload?: Record<string, any>,
+  options?: StepDecoratorOptions
+): (target: unknown, propertyKey: string) => void;
+export function CallWorkflow(
+  pathOrGroupId: string | { webhookPath: string; webhookMethod?: string },
   payload?: Record<string, any>,
   options: StepDecoratorOptions = {}
 ) {
@@ -262,7 +272,17 @@ export function CallWorkflow(
     const meta = getOrCreateWorkflowMeta(target.constructor);
     const stepId = options.id ?? propertyKey;
     const orderKey = options.order ?? meta.steps.length;
-    const factory: StepFactory = (id) => makeCallWorkflowStep(id, workflowId, payload);
+    let workflowId = "";
+    let webhook: { path: string; method: string } | undefined;
+    if (typeof pathOrGroupId === "object" && pathOrGroupId !== null && "webhookPath" in pathOrGroupId) {
+      webhook = {
+        path: pathOrGroupId.webhookPath,
+        method: (pathOrGroupId.webhookMethod ?? "POST").toUpperCase(),
+      };
+    } else {
+      workflowId = pathOrGroupId as string;
+    }
+    const factory: StepFactory = (id) => makeCallWorkflowStep(id, workflowId, payload, webhook);
     meta.steps.push({ stepId, methodKey: propertyKey, orderKey, stage: options.stage, then: options.then, else: options.else, factory });
   };
 }

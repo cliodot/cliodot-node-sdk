@@ -76,6 +76,18 @@ export class WorkflowTransformer {
         cron: triggerData.cron || triggerData.config?.cron,
         timezone: triggerData.timezone || triggerData.config?.timezone,
       };
+    } else if (triggerType === "event") {
+      const cfg = triggerData.config || {};
+      trigger = {
+        type: WorkflowTriggerType.EVENT,
+        event: triggerData.event || cfg.event,
+        source_connector_id:
+          triggerData.source_connector_id || triggerData.sourceConnectorId || cfg.source_connector_id,
+        source_connector_version:
+          triggerData.source_connector_version ||
+          triggerData.sourceConnectorVersion ||
+          cfg.source_connector_version,
+      };
     }
     const graph = buildDependencyGraph(dataItem.edges);
     const order = topologicalSort(dataItem.nodes, graph, triggerNode.id);
@@ -111,6 +123,12 @@ export class WorkflowTransformer {
           baseStep.params = cfg.params || {};
           baseStep.pathParams = cfg.pathParams || cfg.params || {};
           baseStep.body = cfg.body || {};
+          const cv =
+            data.connector_version ||
+            data.connectorVersion ||
+            cfg.connector_version ||
+            cfg.connectorVersion;
+          if (cv) baseStep.connector_version = String(cv);
           addThenElse(baseStep);
         }
       } else if (node.type === "connector_db") {
@@ -118,6 +136,12 @@ export class WorkflowTransformer {
         baseStep.connector_id = data.connectorId;
         baseStep.action = data.action || data.endpointId;
         baseStep.body = cfg.body || cfg;
+        const cvDb =
+          data.connector_version ||
+          data.connectorVersion ||
+          cfg.connector_version ||
+          cfg.connectorVersion;
+        if (cvDb) baseStep.connector_version = String(cvDb);
         addThenElse(baseStep);
       } else if (node.type === "transform") {
         baseStep.type = WorkflowStepType.TRANSFORM;
@@ -134,6 +158,12 @@ export class WorkflowTransformer {
         baseStep.connector_id = data.connectorId;
         baseStep.action = data.action;
         baseStep.body = cfg.body || {};
+        const cvAuth =
+          data.connector_version ||
+          data.connectorVersion ||
+          cfg.connector_version ||
+          cfg.connectorVersion;
+        if (cvAuth) baseStep.connector_version = String(cvAuth);
         addThenElse(baseStep);
       } else if (node.type === "function") {
         baseStep.type = WorkflowStepType.FUNCTION;

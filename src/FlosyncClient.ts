@@ -4,6 +4,7 @@ import { IFunction } from "./types/function";
 import { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 import type { ConnectorsApi, WorkflowsApi, FunctionsApi, ProjectsApi } from "./types/client.api";
 import { CliodotApiError } from "./errors";
+import { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 
 export const DEFAULT_CLIODOT_BASE_URL = "https://sdk.flowfly.dev";
 
@@ -181,8 +182,13 @@ export class FlosyncClient {
   }
 
   connectors: ConnectorsApi = {
-    get: async (connectorId: string): Promise<any> => {
-      const data = await this.request("GET", `/connectors/${connectorId}`);
+    get: async (connectorId: string, options?: { semver?: string; version?: string }): Promise<any> => {
+      const params: Record<string, string> = {};
+      const v = options?.semver ?? options?.version;
+      if (v) {
+        params.semver = v;
+      }
+      const data = await this.request("GET", `/connectors/${connectorId}`, undefined, params);
       const c = data?.connector ?? data;
       if (!c) return null;
       return {
@@ -231,7 +237,10 @@ export class FlosyncClient {
         return this.request("POST", "/connectors", connector);
       }
     },
-    install: async (connectorId: string, options?: { auth?: any; base_url?: string }): Promise<any> => {
+    install: async (
+      connectorId: string,
+      options?: { auth?: any; base_url?: string; version?: string }
+    ): Promise<any> => {
       const data = await this.request("POST", `/connectors/${connectorId}/install`, options ?? {});
       return data?.installation ?? data;
     },
@@ -251,16 +260,15 @@ export class FlosyncClient {
         connection_id?: string;
         timeout?: number;
         vars?: Record<string, any>;
+        connector_version?: string;
       }
     ): Promise<any> => {
       const requestBody: Record<string, any> = {
         ...options?.body,
-        // pathParams: options?.pathParams,
         installation_id: options?.installation_id,
         database: options?.database,
         connection_id: options?.connection_id,
-        // timeout: options?.timeout,
-        // vars: options?.vars,
+        connector_version: options?.connector_version,
       };
       const filteredBody = Object.fromEntries(Object.entries(requestBody).filter(([, v]) => v !== undefined));
       const queryParams = options?.params;
@@ -324,18 +332,36 @@ export class FlosyncClient {
         pagination: data?.pagination,
       };
     },
-    run: async (groupId: string, triggerId: string, payload: { payload?: any; environment?: "dev" | "prod" } = {}): Promise<any> => {
-      const data = await this.request("POST", `/workflows/${groupId}/test/trigger/${triggerId}`, payload);
+    run: async (
+      groupId: string,
+      triggerId: string,
+      opts: { payload?: any; environment?: "dev" | "prod"; executionHeaders?: Record<string, string> } = {}
+    ): Promise<any> => {
+      const { payload, environment, executionHeaders } = opts;
+      const body: Record<string, any> = {};
+      if (payload !== undefined) body.payload = payload;
+      if (environment !== undefined) body.environment = environment;
+      const exec = sanitizeExecutionHeaders(executionHeaders ?? {});
+      if (Object.keys(exec).length > 0) body.executionHeaders = exec;
+      const data = await this.request("POST", `/workflows/${groupId}/test/trigger/${triggerId}`, body);
       return toFinalWorkflowResult(data, this.debug);
     },
-    runByWebhook: async (webhookPath: string, method: string, payload: { body?: any; environment?: "dev" | "prod" } = {}): Promise<any> => {
-      const { environment, body, ...rest } = payload;
-      const data = await this.request("POST", "/workflows/test/webhook", {
+    runByWebhook: async (
+      webhookPath: string,
+      method: string,
+      payload: { body?: any; environment?: "dev" | "prod"; executionHeaders?: Record<string, string> } & Record<string, any> = {}
+    ): Promise<any> => {
+      const { environment, body, executionHeaders, ...rest } = payload;
+      const innerPayload = { ...(body ?? {}), ...rest };
+      const exec = sanitizeExecutionHeaders(executionHeaders ?? {});
+      const reqBody: Record<string, any> = {
         webhookPath,
         webhookMethod: method,
-        payload: { ...(body ?? {}), ...rest },
-        ...(environment && { environment }),
-      });
+        payload: innerPayload,
+      };
+      if (environment !== undefined) reqBody.environment = environment;
+      if (Object.keys(exec).length > 0) reqBody.executionHeaders = exec;
+      const data = await this.request("POST", "/workflows/test/webhook", reqBody);
       return toFinalWorkflowResult(data, this.debug);
     },
     promote: async (groupId: string): Promise<any> => {

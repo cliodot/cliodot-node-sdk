@@ -1,6 +1,7 @@
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import { renderTemplate } from "../template";
+import { isTypedConnectorDef } from "../connectors/registry";
 import { jsonResponderConnector } from "../connectors/builtin";
 import { executeString } from "./utilities/string.executor";
 import { executeMath } from "./utilities/math.executor";
@@ -183,14 +184,19 @@ async function executeRestConnector(
   }
 
   const raw = resp.data;
+  let mapped: any;
   if (endpoint.response_mapping && typeof endpoint.response_mapping === "object") {
-    const mapped: Record<string, any> = {};
+    mapped = {};
     for (const [outKey, srcPath] of Object.entries(endpoint.response_mapping)) {
       mapped[outKey] = getByPath(raw, srcPath as string);
     }
-    return { raw, mapped };
+  } else {
+    mapped = raw;
   }
-  return { raw, mapped: raw };
+  const responseWarnings = collectRestResponseWarnings(endpoint, mapped, connectorDef, actionName);
+  const out: any = { raw, mapped };
+  if (responseWarnings.length) out.responseWarnings = responseWarnings;
+  return out;
 }
 
 function getByPath(obj: any, path: string): any {
@@ -202,6 +208,60 @@ function getByPath(obj: any, path: string): any {
     cur = cur[p];
   }
   return cur;
+}
+
+function collectRestResponseWarnings(
+  endpoint: any,
+  mapped: any,
+  connectorDef: ConnectorDef,
+  actionName: string
+): string[] {
+  const w: string[] = [];
+  const cid = connectorDef._id || connectorDef.id || "connector";
+  if (endpoint.response_mapping && mapped != null && typeof mapped === "object" && !Array.isArray(mapped)) {
+    for (const [outKey, srcPath] of Object.entries(endpoint.response_mapping)) {
+      if (!Object.prototype.hasOwnProperty.call(mapped, outKey)) {
+        w.push(`response_mapping output "${outKey}" missing from mapped result (path "${String(srcPath)}")`);
+      } else if (mapped[outKey] === undefined) {
+        w.push(
+          `response_mapping output "${outKey}" is undefined; provider JSON may not match path "${String(srcPath)}"`
+        );
+      }
+    }
+  }
+  if (isTypedConnectorDef(connectorDef)) {
+    const schema = (connectorDef as { __schemas?: Record<string, { response?: unknown }> }).__schemas?.[actionName];
+    const sample = schema?.response;
+    if (sample != null && typeof sample === "object" && !Array.isArray(sample)) {
+      const keys = Object.keys(sample as object);
+      if (keys.length > 0) {
+        if (mapped == null || typeof mapped !== "object" || Array.isArray(mapped)) {
+          w.push(
+            `typed connector "${cid}" action "${actionName}" expected object response, got ${
+              mapped === null ? "null" : Array.isArray(mapped) ? "array" : typeof mapped
+            }`
+          );
+        } else {
+          for (const k of keys) {
+            if (!Object.prototype.hasOwnProperty.call(mapped, k)) {
+              w.push(`typed connector "${cid}" expects response key "${k}" but mapped result has no such key`);
+              continue;
+            }
+            const expected = (sample as Record<string, unknown>)[k];
+            const actual = (mapped as Record<string, unknown>)[k];
+            const expT = expected === null ? "null" : Array.isArray(expected) ? "array" : typeof expected;
+            const actT = actual === null ? "null" : Array.isArray(actual) ? "array" : typeof actual;
+            if (expT !== actT) {
+              w.push(
+                `typed connector "${cid}" response key "${k}" declared as ${expT} but provider returned ${actT}`
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+  return w;
 }
 
 async function executeDbConnector(

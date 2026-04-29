@@ -8,6 +8,29 @@ export interface ValidationOptions {
   [key: string]: any;
 }
 
+export type ValidationApplyContext = {
+  stepId?: string;
+  fieldName?: string;
+};
+
+function validationLocatorPrefix(context: ValidationApplyContext | undefined, validatorName: string): string {
+  const parts: string[] = [];
+  if (context?.stepId) parts.push(`step "${context.stepId}"`);
+  if (context?.fieldName) parts.push(`field "${context.fieldName}"`);
+  parts.push(`validator "${validatorName}"`);
+  return `[${parts.join(" · ")}] `;
+}
+
+function enrichValidationText(
+  context: ValidationApplyContext | undefined,
+  validatorName: string,
+  text: string | undefined,
+  fallback: string
+): string {
+  const base = (text && String(text).trim()) || fallback;
+  return validationLocatorPrefix(context, validatorName) + base;
+}
+
 export const ValidatorFns: Record<string, (v: any, options?: ValidationOptions) => ValidationResult> = {
   required: (v: any, options: ValidationOptions = {}): ValidationResult => {
     const { message } = options;
@@ -388,16 +411,25 @@ export const ValidatorFns: Record<string, (v: any, options?: ValidationOptions) 
 
 export function applyValidations(
   validations: Array<{ validator: string; options?: ValidationOptions }>,
-  value: any
+  value: any,
+  context?: ValidationApplyContext
 ): ValidationResult {
   for (const validation of validations) {
     const { validator, options = {} } = validation;
     const validatorFn = ValidatorFns[validator];
     if (!validatorFn) {
-      return { valid: false, error: `Unknown validator: ${validator}`, message: `Validator "${validator}" is not recognized` };
+      const hint = validationLocatorPrefix(context, validator);
+      throw new Error(`${hint}Unknown validator "${validator}"`);
     }
     const result = validatorFn(value, options);
-    if (!result.valid) return result;
+    if (!result.valid) {
+      return {
+        ...result,
+        valid: false,
+        error: enrichValidationText(context, validator, result.error, result.message || "Validation failed"),
+        message: enrichValidationText(context, validator, result.message, result.error || "Validation failed"),
+      };
+    }
   }
   return { valid: true };
 }

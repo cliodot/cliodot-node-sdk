@@ -31,8 +31,10 @@ export enum WorkflowStepType {
 export interface IWorkflowTrigger {
   type: WorkflowTriggerType;
   source_connector_id?: string;
+  source_connector_version?: string;
   event?: string;
   webhook_url?: string;
+  webhookMethod?: string;
   cron?: string;
   timezone?: string;
   interval?: string;
@@ -51,6 +53,7 @@ export interface IWorkflowStepBase {
 export interface IWorkflowStepApiCall extends IWorkflowStepBase {
   type: WorkflowStepType.API_CALL;
   connector_id: string;
+  connector_version?: string;
   action: string;
   params?: Record<string, any>;
   pathParams?: Record<string, any>;
@@ -67,6 +70,7 @@ export interface IWorkflowStepApiCall extends IWorkflowStepBase {
 export interface IWorkflowStepDb extends IWorkflowStepBase {
   type: WorkflowStepType.DB;
   connector_id: string;
+  connector_version?: string;
   action: string;
   params?: Record<string, any>;
   body?: Record<string, any> | null;
@@ -135,7 +139,14 @@ export interface IWorkflowStepFunction extends IWorkflowStepBase {
 }
 export interface IWorkflowStepCallWorkflow extends IWorkflowStepBase {
   type: WorkflowStepType.CALL_WORKFLOW;
-  workflow_id: string;
+  workflow_id?: string;
+  webhook_path?: string;
+  webhook_method?: string;
+  trigger_id?: string;
+  child_workflow_name?: string;
+  environment?: "dev" | "prod";
+  execution_headers?: Record<string, string>;
+  remote?: boolean;
   payload?: Record<string, any>;
   input_from?: string;
 }
@@ -179,6 +190,7 @@ export interface IWorkflowStepNotify extends IWorkflowStepBase {
 export interface IWorkflowStepEncryption extends IWorkflowStepBase {
   type: WorkflowStepType.ENCRYPTION;
   connector_id: string;
+  connector_version?: string;
   action: string;
   params?: Record<string, any>;
   body?: Record<string, any> | null;
@@ -187,6 +199,7 @@ export interface IWorkflowStepEncryption extends IWorkflowStepBase {
 export interface IWorkflowStepExternalApi extends IWorkflowStepBase {
   type: WorkflowStepType.EXTERNAL_API;
   connector_id?: string;
+  connector_version?: string;
   action?: string;
   params?: Record<string, any>;
   body?: Record<string, any> | string | null;
@@ -212,6 +225,7 @@ export interface IWorkflowStepExternalApi extends IWorkflowStepBase {
 export interface IWorkflowStepAuthentication extends IWorkflowStepBase {
   type: WorkflowStepType.AUTHENTICATION;
   connector_id: string;
+  connector_version?: string;
   action: string;
   params?: Record<string, any>;
   body?: Record<string, any> | null;

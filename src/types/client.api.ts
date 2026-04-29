@@ -42,15 +42,16 @@ export interface ConnectorsExecuteOptions {
   connection_id?: string;
   timeout?: number;
   vars?: Record<string, any>;
+  connector_version?: string;
 }
 
 export interface ConnectorsApi {
-  get(connectorId: string): Promise<any>;
+  get(connectorId: string, options?: { semver?: string; version?: string }): Promise<any>;
   list(options?: ConnectorsListOptions): Promise<ConnectorsListResult>;
   search(options?: ConnectorsSearchOptions): Promise<ConnectorsListResult>;
   installed(options?: ConnectorsInstalledOptions): Promise<ConnectorsInstalledResult>;
   push(connector: Record<string, any>): Promise<any>;
-  install(connectorId: string, options?: { auth?: any; base_url?: string }): Promise<any>;
+  install(connectorId: string, options?: { auth?: any; base_url?: string; version?: string }): Promise<any>;
   uninstall(connectorId: string): Promise<any>;
   execute(connectorId: string, action: string, options?: ConnectorsExecuteOptions): Promise<any>;
 }
@@ -73,8 +74,16 @@ export interface WorkflowsApi {
   push(workflow: IWorkflow): Promise<any>;
   pull(groupId: string): Promise<IWorkflow>;
   list(options?: WorkflowsListOptions): Promise<WorkflowsListResult>;
-  run(groupId: string, triggerId: string, payload: { payload?: any; environment?: "dev" | "prod" }): Promise<any>;
-  runByWebhook(webhookPath: string, method: string, payload: { body?: any; environment?: "dev" | "prod" }): Promise<any>;
+  run(
+    groupId: string,
+    triggerId: string,
+    payload?: { payload?: any; environment?: "dev" | "prod"; executionHeaders?: Record<string, string> }
+  ): Promise<any>;
+  runByWebhook(
+    webhookPath: string,
+    method: string,
+    payload?: { body?: any; environment?: "dev" | "prod"; executionHeaders?: Record<string, string> } & Record<string, any>
+  ): Promise<any>;
   promote(groupId: string): Promise<any>;
 }
 
