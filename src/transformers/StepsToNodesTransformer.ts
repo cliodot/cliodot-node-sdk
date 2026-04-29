@@ -56,12 +56,34 @@ function stepToNodeData(step: IWorkflowStep, index: number): Record<string, any>
   if (step.type === WorkflowStepType.API_CALL) {
     data.connectorId = s.connector_id;
     data.action = s.action;
-    data.connectorConfig = { body: s.body, params: s.params, pathParams: s.pathParams, then: s.then, else: s.else };
+    data.endpointName = s.action;
+    data.connectorConfig = {
+      body: s.body,
+      params: s.params,
+      pathParams: s.pathParams,
+      headers: s.headers,
+      vars: s.vars,
+      installation_id: s.installation_id,
+      connection_id: s.connection_id,
+      database: s.database,
+      timeout: s.timeout,
+      then: s.then,
+      else: s.else,
+    };
+    if (s.connector_version) {
+      data.connector_version = s.connector_version;
+      data.connectorConfig.connector_version = s.connector_version;
+    }
   }
   if (step.type === WorkflowStepType.DB) {
     data.connectorId = s.connector_id;
     data.action = s.action;
+    data.endpointName = s.action;
     data.connectorConfig = { ...s.body, then: s.then, else: s.else };
+    if (s.connector_version) {
+      data.connector_version = s.connector_version;
+      data.connectorConfig.connector_version = s.connector_version;
+    }
   }
   if (step.type === WorkflowStepType.TRANSFORM) {
     data.mapping = s.mapping;
@@ -85,6 +107,20 @@ function stepToNodeData(step: IWorkflowStep, index: number): Record<string, any>
     data.connectorId = s.connector_id;
     data.action = s.action;
     data.connectorConfig = { body: s.body, then: s.then, else: s.else };
+    if (s.connector_version) {
+      data.connector_version = s.connector_version;
+      data.connectorConfig.connector_version = s.connector_version;
+    }
+  }
+  if (step.type === WorkflowStepType.ENCRYPTION) {
+    data.connectorId = s.connector_id;
+    data.action = s.action;
+    data.endpointName = s.action;
+    data.connectorConfig = { body: s.body, params: s.params, then: s.then, else: s.else };
+    if (s.connector_version) {
+      data.connector_version = s.connector_version;
+      data.connectorConfig.connector_version = s.connector_version;
+    }
   }
   if (step.type === WorkflowStepType.FUNCTION) {
     data.functionId = s.function_id;
@@ -113,13 +149,22 @@ export function stepsToNodes(workflow: IWorkflow): IWorkflowGroup {
   const webhookMethod = (trigger as any).webhookMethod || "POST";
   const cron = (trigger as any).cron;
   const timezone = (trigger as any).timezone;
+  const event = (trigger as any).event;
+  const sourceConnectorId = (trigger as any).source_connector_id;
+  const sourceConnectorVersion = (trigger as any).source_connector_version;
 
   const triggerConfig: Record<string, any> =
     triggerType === "http" || triggerType === "webhook"
       ? { webhookPath, webhookMethod }
       : triggerType === "job" || triggerType === "schedule"
         ? { cron: cron ?? "* * * * *", timezone }
-        : {};
+        : triggerType === "event"
+          ? {
+              event,
+              source_connector_id: sourceConnectorId,
+              source_connector_version: sourceConnectorVersion,
+            }
+          : {};
 
   nodes.push({
     id: triggerId,
@@ -131,6 +176,9 @@ export function stepsToNodes(workflow: IWorkflow): IWorkflowGroup {
       webhookMethod,
       cron,
       timezone,
+      event,
+      source_connector_id: sourceConnectorId,
+      source_connector_version: sourceConnectorVersion,
       label: "Trigger",
     },
     label: "Trigger",

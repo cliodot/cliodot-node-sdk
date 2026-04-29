@@ -50,6 +50,16 @@ Think of typed connectors as a contract layer over the existing execution engine
 - `vars`: step-scoped values merged into workflow vars before execution
 - `response`: expected result shape for typing and editor support
 
+## Connector versioning (semver)
+
+For **versioned** tenant REST connectors, pin the snapshot everywhere the runtime needs a stable contract:
+
+1. **Workflow steps** — add optional `connector_version` next to `body` / `params` in `@Connector(...)` or `s.connector(...)` config (e.g. `"1.2.0"`). This is persisted when you push workflows to Flowsync so execution loads the matching snapshot.
+2. **Remote execute** — `flosync.runConnector(def, action, { connector_version: "1.2.0", ... })` and `FlosyncClient.connectors.execute(id, action, { connector_version, ... })`. Callers who are not the connector owner must use the version that matches their installation; owners may override per API rules (including `draft` where allowed).
+3. **Fetch / install** — `FlosyncClient.connectors.get(id, { semver: "1.2.0" })` (or `version`) and `connectors.install(id, { version: "latest", ... })` align with the Flowsync connector API.
+
+Typed helper types (`ConnectorBody`, `ConnectorResponse`, etc.) describe the contract for a given `defineTypedConnector` definition; **which published semver** that definition corresponds to is chosen by you when you set `connector_version` on steps or when you generate/sync definitions from the API.
+
 ## Recommended usage pattern
 
 1. Define connector schema once near the connector.

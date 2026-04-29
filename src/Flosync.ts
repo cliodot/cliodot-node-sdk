@@ -12,6 +12,7 @@ import {
   type ConnectorRunOptionsTyped,
   type ConnectorActionSchema,
 } from "./connectors/registry";
+import { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 
 export interface FlosyncConfig {
   apiKey?: string;
@@ -100,28 +101,49 @@ export class Flosync {
     return this.register(workflow);
   }
 
-  async run(workflowIdOrName: string, payload: any = {}, options?: { remote?: boolean }): Promise<any> {
+  async run(
+    workflowIdOrName: string,
+    payload: any = {},
+    options?: { remote?: boolean; executionHeaders?: Record<string, string>; triggerId?: string }
+  ): Promise<any> {
     const workflow = this.workflows.get(workflowIdOrName) ?? this.workflowsByName.get(workflowIdOrName);
     if (workflow) {
       const runner = (this as any).runner;
       if (!runner) throw new Error("LocalRunner not initialized. Call flosync.configure() first.");
       const normalized = this.normalizeRunPayload(payload);
+      if (options?.executionHeaders) {
+        normalized.headers = {
+          ...normalized.headers,
+          ...sanitizeExecutionHeaders(options.executionHeaders),
+        };
+      }
       if (this.config.debug) normalized.debug = true;
       return runner.runWorkflow(workflow, normalized);
     }
     const client = this.getClient();
     if (client && (options?.remote ?? true)) {
-      return this.runById(workflowIdOrName, payload);
+      return this.runById(workflowIdOrName, payload, {
+        triggerId: options?.triggerId,
+        executionHeaders: options?.executionHeaders,
+      });
     }
     throw new Error(`Workflow not found: ${workflowIdOrName}`);
   }
 
-  async runById(workflowId: string, payload: any = {}, options?: { triggerId?: string }): Promise<any> {
+  async runById(
+    workflowId: string,
+    payload: any = {},
+    options?: { triggerId?: string; executionHeaders?: Record<string, string> }
+  ): Promise<any> {
     const client = this.getClient();
     if (!client) throw new Error("FlosyncClient not configured. Set apiKey and apiSecret for remote run.");
     const triggerId = options?.triggerId ?? "trigger";
     const normalized = this.normalizeRunPayload(payload);
-    return client.workflows.run(workflowId, triggerId, { payload: normalized });
+    const exec = sanitizeExecutionHeaders(options?.executionHeaders ?? {});
+    return client.workflows.run(workflowId, triggerId, {
+      payload: normalized,
+      ...(Object.keys(exec).length > 0 && { executionHeaders: exec }),
+    });
   }
 
   async runByWebhook(webhookPath: string, method: string, payload: any = {}): Promise<any> {
@@ -143,7 +165,9 @@ export class Flosync {
   >(
     connectorDef: TypedConnectorDef<TActions, TSchemas>,
     actionKey: TKey,
-    options?: ConnectorRunOptionsTyped<TypedConnectorDef<TActions, TSchemas>, TKey>,
+    options?: ConnectorRunOptionsTyped<TypedConnectorDef<TActions, TSchemas>, TKey> & {
+      connector_version?: string;
+    },
     runOptions?: { remote?: boolean }
   ): Promise<any>;
   async runConnector(
@@ -159,6 +183,7 @@ export class Flosync {
       connection_id?: string;
       timeout?: number;
       vars?: Record<string, any>;
+      connector_version?: string;
     },
     runOptions?: { remote?: boolean }
   ): Promise<any>;
@@ -175,6 +200,7 @@ export class Flosync {
       connection_id?: string;
       timeout?: number;
       vars?: Record<string, any>;
+      connector_version?: string;
     },
     runOptions?: { remote?: boolean }
   ): Promise<any> {
@@ -227,7 +253,21 @@ export class Flosync {
   private normalizeRunPayload(payload: any): any {
     if (!payload || typeof payload !== "object") return { trigger: { data: payload, body: payload } };
     if (Array.isArray(payload)) return { trigger: { data: payload, body: payload } };
-    const passthroughKeys = ["headers", "pathParams", "path_params", "params", "query", "vars", "envVars", "env_vars", "env", "trigger", "callStack", "call_stack"];
+    const passthroughKeys = [
+      "headers",
+      "executionHeaders",
+      "pathParams",
+      "path_params",
+      "params",
+      "query",
+      "vars",
+      "envVars",
+      "env_vars",
+      "env",
+      "trigger",
+      "callStack",
+      "call_stack",
+    ];
     const hasExplicitBody = "body" in payload || "data" in payload || (payload.trigger && ("body" in payload.trigger || "data" in payload.trigger));
     let data: any;
     if (hasExplicitBody) {
@@ -237,11 +277,13 @@ export class Flosync {
       data = Object.keys(bodyLike).length > 0 ? bodyLike : payload;
     }
     const trigger = payload.trigger ?? {};
+    const headerBase = sanitizeExecutionHeaders(payload.headers ?? trigger.headers ?? {});
+    const headerExec = sanitizeExecutionHeaders((payload as { executionHeaders?: unknown }).executionHeaders);
     return {
       body: data,
       data: data,
       trigger: { ...trigger, data: trigger.data ?? data, body: trigger.body ?? data },
-      headers: payload.headers ?? trigger.headers ?? {},
+      headers: { ...headerBase, ...headerExec },
       pathParams: payload.pathParams ?? payload.path_params ?? trigger.pathParams ?? {},
       params: payload.params ?? trigger.params ?? {},
       query: payload.query ?? trigger.query ?? {},

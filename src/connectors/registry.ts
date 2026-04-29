@@ -234,6 +234,13 @@ export function defineCustomConnectorFromList(
   return { id, actions };
 }
 
+export function defineRemoteConnectorRef<TActions extends Record<string, string>>(
+  serverConnectorId: string,
+  actions: TActions
+): CustomConnectorDef<TActions> {
+  return { id: serverConnectorId, actions };
+}
+
 // ─── Typed Connector Definitions ──────────────────────────────────────────────
 
 export type WireValue<T> = T extends string | number | boolean | null | undefined
@@ -453,6 +460,8 @@ export function isCustomConnectorDef(v: unknown): v is CustomConnectorDef<any> {
  * type VerifyResponse = ConnectorResponse<typeof Paystack, "verifyTransaction">;
  * // => { status: string; amount: number; currency: string }
  * ```
+ *
+ * For optional runtime checks against real HTTP JSON, give each `response` value a **concrete sample object** with the same keys and representative JavaScript types (for example `{ status: "", amount: 0, currency: "" }` instead of `{} as { ... }`). Empty objects produce no runtime shape hints; samples enable shallow key and `typeof` warnings when the mapped connector response diverges.
  */
 export function defineTypedConnector<
   TActions extends Record<string, string>,

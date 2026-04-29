@@ -119,6 +119,13 @@ function buildHttpStepFailurePayload(err: any): Record<string, any> {
   return out;
 }
 
+function warnConnectorResponseShape(stepId: string, connectorId: string, action: string, resp: any) {
+  const w = resp?.responseWarnings;
+  if (Array.isArray(w) && w.length) {
+    console.warn(`[Flosync] step "${stepId}" (${connectorId} · ${action}): ${w.join("; ")}`);
+  }
+}
+
 export interface RunState {
   workflow: IWorkflow;
   trigger: any;
@@ -193,13 +200,20 @@ export class ProcessorEngine {
     return builtin[id] ?? this.connectors.get(id);
   }
 
-  private async getConnectorOrFetch(id: string): Promise<any> {
-    let connector = this.getConnector(id);
+  private async getConnectorOrFetch(id: string, connectorVersion?: string): Promise<any> {
+    const hasVer = connectorVersion != null && String(connectorVersion).trim() !== "";
+    const v = hasVer ? String(connectorVersion).trim() : "";
+    const cacheKey = hasVer ? `${id}::__v__:${v}` : id;
+    let connector = this.connectors.get(cacheKey);
     if (connector) return connector;
+    if (!hasVer) {
+      connector = this.getConnector(id);
+      if (connector) return connector;
+    }
     if (this.client?.connectors?.get) {
       try {
-        connector = await this.client.connectors.get(id);
-        if (connector) this.connectors.set(id, connector);
+        connector = await this.client.connectors.get(id, hasVer ? { version: v } : undefined);
+        if (connector) this.connectors.set(cacheKey, connector);
       } catch {
         connector = null;
       }
@@ -399,7 +413,7 @@ export class ProcessorEngine {
               const val = fields[i];
               const name = (fieldNames && fieldNames[i]) || `field_${i}`;
               const validations = validators.map((v: any) => ({ validator: v.name, options: v.config || {} }));
-              const validation = applyValidations(validations, val);
+              const validation = applyValidations(validations, val, { stepId: step.id, fieldName: name });
               if (!validation.valid) {
                 allValid = false;
                 errors[name] = validation.error || validation.message || "Validation failed";
@@ -597,7 +611,7 @@ export class ProcessorEngine {
 
         if (step.type === WorkflowStepType.API_CALL) {
           const apiStep = step as any;
-          const connector = await this.getConnectorOrFetch(apiStep.connector_id);
+          const connector = await this.getConnectorOrFetch(apiStep.connector_id, apiStep.connector_version);
           if (!connector) throw new Error("connector not found: " + apiStep.connector_id);
           if (apiStep.vars && typeof apiStep.vars === "object" && !Array.isArray(apiStep.vars)) {
             const merged = { ...state.vars };
@@ -649,6 +663,7 @@ export class ProcessorEngine {
           if (apiStep.files) execOpts.files = apiStep.files;
           const resp = await executeConnectorAction(connector, apiStep.action, execOpts, state);
           if (resp?.terminate) return resp;
+          warnConnectorResponseShape(step.id, apiStep.connector_id, apiStep.action, resp);
           const normalResp = resp as { mapped?: any; raw?: any };
           state.stepResults[step.id] = normalResp?.mapped ?? normalResp?.raw ?? null;
 
@@ -687,7 +702,7 @@ export class ProcessorEngine {
 
         if (step.type === WorkflowStepType.AUTHENTICATION) {
           const authStep = step as any;
-          const connector = await this.getConnectorOrFetch(authStep.connector_id);
+          const connector = await this.getConnectorOrFetch(authStep.connector_id, authStep.connector_version);
           if (!connector) throw new Error("connector not found: " + authStep.connector_id);
           let body = authStep.body || {};
           if (typeof body === "object") body = JSON.parse(await renderTemplate(JSON.stringify(body), state));
@@ -732,13 +747,14 @@ export class ProcessorEngine {
 
         if (step.type === WorkflowStepType.ENCRYPTION) {
           const encStep = step as any;
-          const connector = await this.getConnectorOrFetch(encStep.connector_id);
+          const connector = await this.getConnectorOrFetch(encStep.connector_id, encStep.connector_version);
           if (!connector) throw new Error("connector not found: " + encStep.connector_id);
           let body = encStep.body || encStep.params || {};
           if (typeof body === "object") body = JSON.parse(await renderTemplate(JSON.stringify(body), state));
           else if (typeof body === "string") body = await renderTemplate(body, state);
           const resp = await executeConnectorAction(connector, encStep.action, { body, ...body }, state);
           if (resp?.terminate) return resp;
+          warnConnectorResponseShape(step.id, encStep.connector_id, encStep.action, resp);
           const normalResp = resp as { mapped?: any; raw?: any };
           state.stepResults[step.id] = normalResp?.mapped ?? normalResp?.raw ?? null;
 
@@ -771,7 +787,7 @@ export class ProcessorEngine {
 
         if (step.type === WorkflowStepType.DB) {
           const dbStep = step as any;
-          const connector = await this.getConnectorOrFetch(dbStep.connector_id);
+          const connector = await this.getConnectorOrFetch(dbStep.connector_id, dbStep.connector_version);
           if (!connector) throw new Error("connector not found: " + dbStep.connector_id);
           let body = dbStep.body || {};
           if (typeof body === "object") body = JSON.parse(await renderTemplate(JSON.stringify(body), state));
@@ -781,6 +797,7 @@ export class ProcessorEngine {
           if (dbStep.database) options.database = dbStep.database;
           const resp = await executeConnectorAction(connector, dbStep.action, options, state);
           if (resp?.terminate) return resp;
+          warnConnectorResponseShape(step.id, dbStep.connector_id, dbStep.action, resp);
           const normalResp = resp as { mapped?: any; raw?: any };
           state.stepResults[step.id] = normalResp?.mapped ?? normalResp?.raw ?? null;
 
@@ -872,16 +889,120 @@ export class ProcessorEngine {
 
         if (step.type === WorkflowStepType.CALL_WORKFLOW) {
           const wfStep = step as any;
-          const workflowId = wfStep.workflow_id;
-          if (!workflowId) throw new Error("call_workflow step missing workflow_id");
-          if (!this.client?.workflows?.run) throw new Error("Client required for callWorkflow. Configure apiKey and apiSecret.");
+          const workflowId = wfStep.workflow_id as string | undefined;
+          let wPath = wfStep.webhook_path || wfStep.webhookPath;
+          if (typeof wPath === "string" && wPath.includes("{{")) {
+            wPath = await renderTemplate(wPath, state);
+          }
+          wPath = wPath ? String(wPath).trim() : "";
+          const wMethod = (wfStep.webhook_method || wfStep.webhookMethod || "POST").toUpperCase();
+          if (!workflowId && !wPath) throw new Error("call_workflow step missing workflow_id and webhook_path");
+          const triggerId = wfStep.trigger_id || wfStep.triggerId || "trigger";
+          const forceRemote = wfStep.remote === true;
           let payload = wfStep.payload || {};
           if (typeof payload === "object") {
             payload = JSON.parse(await renderTemplate(JSON.stringify(payload), state));
           }
-          const result = await this.client.workflows.run(workflowId, "trigger", { payload });
-          const body = result?.body ?? result?.data ?? result;
-          state.stepResults[step.id] = body;
+          const execHdrs = wfStep.execution_headers || wfStep.executionHeaders;
+          const extraHdr =
+            execHdrs && typeof execHdrs === "object"
+              ? Object.fromEntries(
+                  await Promise.all(
+                    Object.entries(execHdrs).map(async ([k, val]) => [
+                      k,
+                      typeof val === "string" && val.includes("{{") ? await renderTemplate(val, state) : val,
+                    ])
+                  )
+                )
+              : {};
+          const bodyData = payload?.data ?? payload?.body ?? payload ?? {};
+          const normPath = (p: string) => {
+            const s = String(p || "").trim();
+            if (!s) return s;
+            return s.startsWith("/") ? s : `/${s}`;
+          };
+          const stackLabel = workflowId || wPath || "call";
+          const nextStack = [...(state.callStack || []), { kind: "workflow", workflowId: stackLabel, stepId: step.id }];
+          if (nextStack.filter((x: any) => x?.kind === "workflow").length > 15) {
+            throw new Error("call_workflow nesting depth exceeded");
+          }
+          if (!forceRemote) {
+            let local: IWorkflow | undefined = undefined;
+            if (workflowId) {
+              local = this.workflows.get(workflowId);
+              if (!local) {
+                for (const w of this.workflows.values()) {
+                  const ww = w as IWorkflow;
+                  if (ww._id === workflowId || (ww as any).__rawId === workflowId || ww.name === workflowId) {
+                    local = ww;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!local && wPath) {
+              for (const w of this.workflows.values()) {
+                const ww = w as IWorkflow;
+                const tr = ww.trigger as any;
+                const url = tr?.webhook_url;
+                const m = (tr?.webhookMethod ?? "POST").toUpperCase();
+                if (url && normPath(url) === normPath(wPath) && m === wMethod) {
+                  local = ww;
+                  break;
+                }
+              }
+            }
+            if (local) {
+              const sub = await this.runWorkflow(local, {
+                body: bodyData,
+                data: bodyData,
+                headers: { ...state.headers, ...extraHdr },
+                pathParams: state.pathParams,
+                query: state.query,
+                vars: { ...state.vars },
+                envVars: state.env,
+                callStack: nextStack,
+              });
+              if (sub && (sub as any).terminate) {
+                state.stepResults[step.id] = { terminated: true, ...(sub as any) };
+              } else {
+                state.stepResults[step.id] = (sub as any)?.body ?? sub;
+              }
+            } else if (!this.client?.workflows?.run) {
+              throw new Error(
+                "call_workflow: workflow not found locally and FlosyncClient is not configured. Register the child workflow or set remote: true with apiKey/apiSecret."
+              );
+            }
+          }
+          if (forceRemote || !state.stepResults[step.id]) {
+            if (!this.client?.workflows?.run) {
+              throw new Error("Client required for remote call_workflow. Configure apiKey and apiSecret.");
+            }
+            let result: any;
+            if (wPath) {
+              const wbPayload: Record<string, any> = {
+                body: bodyData,
+                environment: wfStep.environment,
+              };
+              if (extraHdr && Object.keys(extraHdr).length > 0) {
+                wbPayload.executionHeaders = extraHdr as Record<string, string>;
+              }
+              result = await this.client.workflows.runByWebhook(wPath, wMethod, wbPayload);
+            } else {
+              const normPayload =
+                payload && typeof payload === "object" && !Array.isArray(payload) && ("data" in payload || "body" in payload)
+                  ? payload
+                  : { body: bodyData, data: bodyData };
+              result = await this.client.workflows.run(workflowId!, triggerId, {
+                payload: normPayload,
+                environment: wfStep.environment,
+                executionHeaders:
+                  extraHdr && Object.keys(extraHdr).length > 0 ? (extraHdr as Record<string, string>) : undefined,
+              });
+            }
+            const body = result?.body ?? result?.data ?? result;
+            state.stepResults[step.id] = body;
+          }
 
           if (typeof (step as any).post_source === "string" && (step as any).post_source.trim().length > 0) {
             const postFnSource = (step as any).post_source as string;
@@ -1077,7 +1198,7 @@ export class ProcessorEngine {
             const val = fields[i];
             const name = (fieldNames && fieldNames[i]) || `field_${i}`;
             const validations = validators.map((v: any) => ({ validator: v.name, options: v.config || {} }));
-            const validation = applyValidations(validations, val);
+            const validation = applyValidations(validations, val, { stepId: step.id, fieldName: name });
             if (!validation.valid) {
               allValid = false;
               errors[name] = validation.error || validation.message || "Validation failed";
@@ -1103,7 +1224,7 @@ export class ProcessorEngine {
       }
       if (step.type === "api_call" || (step as any).type === WorkflowStepType.API_CALL) {
         const apiStep = step as any;
-        const connector = await this.getConnectorOrFetch(apiStep.connector_id);
+        const connector = await this.getConnectorOrFetch(apiStep.connector_id, apiStep.connector_version);
         if (!connector) throw new Error("connector not found: " + apiStep.connector_id);
         if (apiStep.vars && typeof apiStep.vars === "object" && !Array.isArray(apiStep.vars)) {
           const merged = { ...state.vars };
@@ -1157,16 +1278,18 @@ export class ProcessorEngine {
         if (apiStep.files) execOpts.files = apiStep.files;
         const resp = await executeConnectorAction(connector, apiStep.action, execOpts, state);
         if (resp?.terminate) return { ok: true, data: resp.body, stepResults: state.stepResults };
+        warnConnectorResponseShape(step.id, apiStep.connector_id, apiStep.action, resp);
         state.stepResults[step.id] = (resp as any)?.mapped ?? (resp as any)?.raw ?? null;
       }
       if (step.type === "db" || (step as any).type === WorkflowStepType.DB) {
         const dbStep = step as any;
-        const connector = await this.getConnectorOrFetch(dbStep.connector_id);
+        const connector = await this.getConnectorOrFetch(dbStep.connector_id, dbStep.connector_version);
         if (!connector) throw new Error("connector not found: " + dbStep.connector_id);
         let body = dbStep.body || {};
         if (typeof body === "object") body = JSON.parse(await renderTemplate(JSON.stringify(body), ctx));
         const resp = await executeConnectorAction(connector, dbStep.action, { ...body }, state);
         if (resp?.terminate) return { ok: true, data: resp.body, stepResults: state.stepResults };
+        warnConnectorResponseShape(step.id, dbStep.connector_id, dbStep.action, resp);
         state.stepResults[step.id] = (resp as any)?.mapped ?? (resp as any)?.raw ?? null;
       }
     }

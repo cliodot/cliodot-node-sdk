@@ -1,12 +1,14 @@
 export { flosync, Flosync } from "./Flosync";
 export type { FlosyncConfig } from "./Flosync";
-export { variable, v } from "./variable";
+export { variable, v, defineStepVars } from "./variable";
+export type { StepKeyPath } from "./variable";
 export { createCliodotConnector } from "./connectors/builtin";
 export {
   ConnectorId,
   ConnectorActions,
   defineCustomConnector,
   defineCustomConnectorFromList,
+  defineRemoteConnectorRef,
   defineTypedConnector,
   getConnectorActions,
   listBuiltInConnectors,
@@ -32,6 +34,7 @@ export type {
 } from "./connectors/registry";
 export { FlosyncClient, DEFAULT_CLIODOT_BASE_URL } from "./FlosyncClient";
 export type { FlosyncClientConfig } from "./FlosyncClient";
+export { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 export { CliodotApiError } from "./errors";
 export type {
   ConnectorsApi,
