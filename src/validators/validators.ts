@@ -409,6 +409,37 @@ export const ValidatorFns: Record<string, (v: any, options?: ValidationOptions) 
   },
 };
 
+export type ValidationFailureItem = {
+  validator: string;
+  message: string;
+};
+
+export function applyValidationsCollectAll(
+  validations: Array<{ validator: string; options?: ValidationOptions }>,
+  value: any,
+  context?: ValidationApplyContext
+): { valid: boolean; failures: ValidationFailureItem[] } {
+  const failures: ValidationFailureItem[] = [];
+  for (const validation of validations) {
+    const { validator, options = {} } = validation;
+    const validatorFn = ValidatorFns[validator];
+    if (!validatorFn) {
+      const hint = validationLocatorPrefix(context, validator);
+      throw new Error(`${hint}Unknown validator "${validator}"`);
+    }
+    const result = validatorFn(value, options);
+    if (!result.valid) {
+      const clean =
+        (result.message && String(result.message).trim()) ||
+        (result.error && String(result.error).trim()) ||
+        "Validation failed";
+      failures.push({ validator, message: clean });
+    }
+  }
+
+  return { valid: failures.length === 0, failures };
+}
+
 export function applyValidations(
   validations: Array<{ validator: string; options?: ValidationOptions }>,
   value: any,
