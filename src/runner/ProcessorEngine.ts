@@ -46,7 +46,7 @@ async function renderBodyRecursive(val: any, ctx: Record<string, any>): Promise<
   return val;
 }
 import { executeConnectorAction } from "./connector.executor";
-import { applyValidations } from "../validators/validators";
+import { applyValidationsCollectAll } from "../validators/validators";
 import {
   jsonResponderConnector,
   httpResponderConnector,
@@ -404,8 +404,13 @@ export class ProcessorEngine {
               return { fields: resolvedFields, fieldNames, validators: resolvedValidators };
             })
           );
-          const errors: Record<string, string> = {};
+          const errors: Record<string, string[]> = {};
           let allValid = true;
+          const pushErrors = (fieldName: string, messages: string[]) => {
+            if (!messages.length) return;
+            const prev = errors[fieldName] ?? [];
+            errors[fieldName] = [...new Set([...prev, ...messages])];
+          };
           for (const group of resolvedGroups) {
             const { fields = [], fieldNames = [], validators = [] } = group;
             if (fields.length === 0 || validators.length === 0) continue;
@@ -413,10 +418,16 @@ export class ProcessorEngine {
               const val = fields[i];
               const name = (fieldNames && fieldNames[i]) || `field_${i}`;
               const validations = validators.map((v: any) => ({ validator: v.name, options: v.config || {} }));
-              const validation = applyValidations(validations, val, { stepId: step.id, fieldName: name });
-              if (!validation.valid) {
+              const { valid, failures } = applyValidationsCollectAll(validations, val, {
+                stepId: step.id,
+                fieldName: name,
+              });
+              if (!valid) {
                 allValid = false;
-                errors[name] = validation.error || validation.message || "Validation failed";
+                pushErrors(
+                  name,
+                  failures.map((f) => f.message)
+                );
               }
             }
           }
@@ -1189,8 +1200,13 @@ export class ProcessorEngine {
             return { fields: resolvedFields, fieldNames, validators: resolvedValidators };
           })
         );
-        const errors: Record<string, string> = {};
+        const errors: Record<string, string[]> = {};
         let allValid = true;
+        const pushErrors = (fieldName: string, messages: string[]) => {
+          if (!messages.length) return;
+          const prev = errors[fieldName] ?? [];
+          errors[fieldName] = [...new Set([...prev, ...messages])];
+        };
         for (const group of resolvedGroups) {
           const { fields = [], fieldNames = [], validators = [] } = group;
           if (fields.length === 0 || validators.length === 0) continue;
@@ -1198,16 +1214,23 @@ export class ProcessorEngine {
             const val = fields[i];
             const name = (fieldNames && fieldNames[i]) || `field_${i}`;
             const validations = validators.map((v: any) => ({ validator: v.name, options: v.config || {} }));
-            const validation = applyValidations(validations, val, { stepId: step.id, fieldName: name });
-            if (!validation.valid) {
+            const { valid, failures } = applyValidationsCollectAll(validations, val, {
+              stepId: step.id,
+              fieldName: name,
+            });
+            if (!valid) {
               allValid = false;
-              errors[name] = validation.error || validation.message || "Validation failed";
+              pushErrors(
+                name,
+                failures.map((f) => f.message)
+              );
             }
           }
         }
         state.stepResults[step.id] = {
           valid: allValid,
           ok: allValid,
+          statusCode: allValid ? 200 : 400,
           errors: Object.keys(errors).length > 0 ? errors : undefined,
           result: allValid ? { valid: true } : { valid: false },
         };
