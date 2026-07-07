@@ -34,6 +34,7 @@ export type {
 } from "./connectors/registry";
 export { FlosyncClient, DEFAULT_CLIODOT_BASE_URL } from "./FlosyncClient";
 export type { FlosyncClientConfig } from "./FlosyncClient";
+export { OAuthAppClient } from "./OAuthAppClient";
 export { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 export { CliodotApiError } from "./errors";
 export type {
@@ -51,6 +52,33 @@ export type {
   WorkflowsListOptions,
   WorkflowsListResult,
 } from "./types/client.api";
+export type {
+  OAuthAppClientConfig,
+  OAuthAppClientApi,
+  OAuthAppErrorCode,
+  OAuthConnectApi,
+  OAuthConnectStartInput,
+  OAuthConnectStartResponse,
+  OAuthConnectionIdentity,
+  OAuthConnectionResponse,
+  OAuthConnectionsApi,
+  OAuthConnectionWithTokenResponse,
+  OAuthDeleteResponse,
+  OAuthExchangeInput,
+  OAuthExchangeResponse,
+  OAuthRevokeInput,
+  OAuthRevokeResponse,
+  OAuthSanitizedConnection,
+  OAuthAppRegenerateCredentialsResponse,
+  OAuthTokenFields,
+  OAuthTokenResponse,
+  OAuthUrls,
+} from "./types/oauth-app.api";
+export {
+  OAuthConnectionStorage,
+  OAuthConnectionStatus,
+  OAuthTokenExposurePolicy,
+} from "./types/oauth-app.api";
 export { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 export { WorkflowBuilder, StepBuilder, StepResult } from "./WorkflowBuilder";
 export { ConnectorBuilder, connector } from "./ConnectorBuilder";

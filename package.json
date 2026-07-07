@@ -1,6 +1,6 @@
 {
   "name": "cliodot",
-  "version": "1.1.0",
+  "version": "1.2.3",
   "description": "SDK for building workflows, APIs, and functions with Cliodot Flowsync",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,6 +11,7 @@
     "build": "tsc && node scripts/obfuscate.js",
     "dev": "tsc -w",
     "test": "jest",
+    "get-oauth-connection-token": "DOTENV_CONFIG_PATH=../.env node -r dotenv/config scripts/get-oauth-connection-token.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

@@ -3,7 +3,7 @@ import { IWorkflow } from "./types/workflow";
 import { IFunction } from "./types/function";
 import { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 import type { ConnectorsApi, WorkflowsApi, FunctionsApi, ProjectsApi } from "./types/client.api";
-import { CliodotApiError } from "./errors";
+import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
 import { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 
 export const DEFAULT_CLIODOT_BASE_URL = "https://sdk.flowfly.dev";
@@ -171,13 +171,7 @@ export class FlosyncClient {
         this.invalidateSessionToken();
         return this.request(method, path, body, params, headers, true);
       }
-      const data = err?.response?.data;
-      const msg = data?.error || data?.message || err?.message || `Request failed: ${method} ${path}`;
-      throw new CliodotApiError(msg, {
-        status: err?.response?.status,
-        response: err?.response,
-        data,
-      });
+      throw cliodotApiErrorFromAxios(err, `Request failed: ${method} ${path}`);
     }
   }
 
