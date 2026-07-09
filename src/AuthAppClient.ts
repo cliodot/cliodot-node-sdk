@@ -5,6 +5,12 @@ import type {
   AuthAppClientApi,
   AuthAppClientConfig,
   AuthMfaApi,
+  AuthOtpProviderApi,
+  AuthOtpSendInput,
+  AuthOtpSendResponse,
+  AuthOtpStatusResponse,
+  AuthOtpVerifyResponse,
+  AuthProvidersApi,
   AuthRecoveryCodesResponse,
   AuthTotpEnrollResponse,
   AuthTotpVerifyResponse,
@@ -38,6 +44,7 @@ export class AuthAppClient implements AuthAppClientApi {
 
   public readonly users: AuthUsersApi;
   public readonly mfa: AuthMfaApi;
+  public readonly providers: AuthProvidersApi;
 
   constructor(config: AuthAppClientConfig) {
     if (!config.baseUrl?.trim()) {
@@ -74,6 +81,35 @@ export class AuthAppClient implements AuthAppClientApi {
         generate: (externalUserId) => this.generateRecoveryCodes(externalUserId),
         verify: (externalUserId, code) => this.verifyRecoveryCode(externalUserId, code),
       },
+    };
+
+    this.providers = {
+      emailOtp: this.createOtpProvider("email_otp"),
+      smsOtp: this.createOtpProvider("sms_otp"),
+    };
+  }
+
+  private createOtpProvider(provider: "email_otp" | "sms_otp"): AuthOtpProviderApi {
+    const base = (externalUserId: string) =>
+      `${this.userPath(externalUserId)}/providers/${provider}`;
+
+    return {
+      enroll: (externalUserId, input) =>
+        this.request<AuthOtpSendResponse>("POST", `${base(externalUserId)}/enroll`, input),
+      challenge: (externalUserId, input) =>
+        this.request<AuthOtpSendResponse>("POST", `${base(externalUserId)}/challenge`, input),
+      resend: (externalUserId, input) =>
+        this.request<AuthOtpSendResponse>("POST", `${base(externalUserId)}/resend`, input),
+      verify: (externalUserId, code) => {
+        assertCode(code);
+        return this.request<AuthOtpVerifyResponse>("POST", `${base(externalUserId)}/verify`, {
+          code,
+        });
+      },
+      disable: (externalUserId) =>
+        this.request<{ ok: true; disabled: true }>("POST", `${base(externalUserId)}/disable`),
+      status: (externalUserId) =>
+        this.request<AuthOtpStatusResponse>("GET", `${base(externalUserId)}/status`),
     };
   }
 

@@ -110,6 +110,12 @@ export type {
   AuthTotpVerifyResponse,
   AuthRecoveryCodesResponse,
   AuthUpsertUserInput,
+  AuthOtpSendInput,
+  AuthOtpSendResponse,
+  AuthOtpVerifyResponse,
+  AuthOtpStatusResponse,
+  AuthOtpProviderApi,
+  AuthProvidersApi,
 } from "./types/auth-app.api";
 export { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 export { WorkflowBuilder, StepBuilder, StepResult } from "./WorkflowBuilder";

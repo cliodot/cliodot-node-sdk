@@ -48,8 +48,69 @@ export type AuthRecoveryCodesResponse = {
 
 export type AuthUpsertUserInput = {
   email?: string;
+  phone?: string;
+  phone_country_code?: string;
   display_name?: string;
   metadata?: Record<string, unknown>;
+};
+
+export type AuthOtpSendInput = {
+  email?: string;
+  phone?: string;
+  phone_country_code?: string;
+  custom_subject?: string;
+  custom_body?: string;
+  cc?: string;
+  bcc?: string;
+  attachments?: Array<{
+    filename?: string;
+    content?: string;
+    url?: string;
+    content_type?: string;
+  }>;
+  meta?: Record<string, string>;
+};
+
+export type AuthOtpSendResponse = {
+  ok: true;
+  sent?: boolean;
+  queued?: boolean;
+  position?: number;
+  scheduled_at?: string;
+  expires_at?: string;
+  challenge_id?: string;
+};
+
+export type AuthOtpVerifyResponse = {
+  ok: true;
+  verified: boolean;
+  method: string;
+  external_user_id?: string;
+  enrollment_status?: string;
+  verified_at?: string;
+};
+
+export type AuthOtpStatusResponse = {
+  ok: true;
+  external_user_id: string;
+  factor_type: string;
+  enrollment_status: string | null;
+  mfa_enabled: boolean;
+  destination_masked?: string;
+};
+
+export type AuthOtpProviderApi = {
+  enroll(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthOtpSendResponse>;
+  challenge(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthOtpSendResponse>;
+  resend(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthOtpSendResponse>;
+  verify(externalUserId: string, code: string): Promise<AuthOtpVerifyResponse>;
+  disable(externalUserId: string): Promise<{ ok: true; disabled: true }>;
+  status(externalUserId: string): Promise<AuthOtpStatusResponse>;
+};
+
+export type AuthProvidersApi = {
+  emailOtp: AuthOtpProviderApi;
+  smsOtp: AuthOtpProviderApi;
 };
 
 export type AuthMfaApi = {
@@ -80,4 +141,5 @@ export type AuthUsersApi = {
 export type AuthAppClientApi = {
   users: AuthUsersApi;
   mfa: AuthMfaApi;
+  providers: AuthProvidersApi;
 };
