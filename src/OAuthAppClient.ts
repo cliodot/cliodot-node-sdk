@@ -4,6 +4,8 @@ import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error"
 import type {
   OAuthAppClientConfig,
   OAuthConnectApi,
+  OAuthConnectPollInput,
+  OAuthConnectPollResponse,
   OAuthConnectStartInput,
   OAuthConnectStartResponse,
   OAuthConnectionResponse,
@@ -14,8 +16,10 @@ import type {
   OAuthExchangeResponse,
   OAuthRevokeInput,
   OAuthRevokeResponse,
+  OAuthSamlPostForm,
   OAuthTokenResponse,
 } from "./types/oauth-app.api";
+import { isDeviceAuthorizationPendingError } from "./types/oauth-app.api";
 
 function trimBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/, "");
@@ -44,12 +48,42 @@ function buildConnectQuery(input: OAuthConnectStartInput): Record<string, string
   return query;
 }
 
+function buildConnectBody(input: OAuthConnectStartInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    provider: input.provider.trim(),
+    redirect_uri: input.redirect_uri.trim(),
+  };
+  const scope = resolveScope(input);
+  if (scope) body.scope = scope;
+  if (input.scopes?.length) body.scopes = input.scopes;
+  if (input.state) body.state = input.state;
+  if (input.external_user_id) body.external_user_id = input.external_user_id;
+  if (input.connection_storage) body.connection_storage = input.connection_storage;
+  if (input.assertion) body.assertion = input.assertion;
+  if (input.subject_token) body.subject_token = input.subject_token;
+  if (input.subject_token_type) body.subject_token_type = input.subject_token_type;
+  if (input.requested_token_type) body.requested_token_type = input.requested_token_type;
+  if (input.actor_token) body.actor_token = input.actor_token;
+  if (input.actor_token_type) body.actor_token_type = input.actor_token_type;
+  if (input.audience) body.audience = input.audience;
+  return body;
+}
+
 function assertConnectInput(input: OAuthConnectStartInput): void {
   if (!input.provider?.trim()) {
     throw new CliodotApiError("connect requires provider");
   }
   if (!input.redirect_uri?.trim()) {
     throw new CliodotApiError("connect requires redirect_uri");
+  }
+}
+
+function assertPollInput(input: OAuthConnectPollInput): void {
+  if (!input.provider?.trim()) {
+    throw new CliodotApiError("poll requires provider");
+  }
+  if (!input.poll_state?.trim()) {
+    throw new CliodotApiError("poll requires poll_state");
   }
 }
 
@@ -66,6 +100,10 @@ function assertConnectionId(connectionId: string): void {
   if (!connectionId?.trim()) {
     throw new CliodotApiError("connectionId is required");
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class OAuthAppClient {
@@ -119,6 +157,7 @@ export class OAuthAppClient {
       body?: Record<string, unknown>;
       params?: Record<string, string>;
       auth?: boolean;
+      validateResponse?: boolean;
     }
   ): Promise<T> {
     const headers: Record<string, string> = {};
@@ -132,11 +171,20 @@ export class OAuthAppClient {
         headers,
         data: options?.body,
         params: options?.params,
+        validateStatus:
+          options?.validateResponse === false
+            ? (status) => status < 500
+            : undefined,
       });
       if (data?.ok === false) {
+        const status = (data as { statusCode?: number }).statusCode;
         throw new CliodotApiError(
           parseApiErrorMessage(data) || "OAuth request failed",
-          { data, code: parseApiErrorCode(data) }
+          {
+            data,
+            code: parseApiErrorCode(data),
+            status: status === 428 ? 428 : undefined,
+          }
         );
       }
       return data as T;
@@ -144,7 +192,8 @@ export class OAuthAppClient {
       if (err instanceof CliodotApiError) {
         throw err;
       }
-      throw cliodotApiErrorFromAxios(err, `Request failed: ${method} ${path}`);
+      const apiErr = cliodotApiErrorFromAxios(err, `Request failed: ${method} ${path}`);
+      throw apiErr;
     }
   }
 
@@ -152,21 +201,41 @@ export class OAuthAppClient {
     start: async (input: OAuthConnectStartInput): Promise<OAuthConnectStartResponse> => {
       assertConnectInput(input);
       const appId = this.resolveAppId(input.appId);
-      const body: Record<string, unknown> = {
-        provider: input.provider.trim(),
-        redirect_uri: input.redirect_uri.trim(),
-      };
-      const scope = resolveScope(input);
-      if (scope) body.scope = scope;
-      if (input.scopes?.length) body.scopes = input.scopes;
-      if (input.state) body.state = input.state;
-      if (input.external_user_id) body.external_user_id = input.external_user_id;
-      if (input.connection_storage) body.connection_storage = input.connection_storage;
       return this.request<OAuthConnectStartResponse>(
         "POST",
         `/apps/${encodeURIComponent(appId)}/connect`,
-        { body, auth: false }
+        { body: buildConnectBody(input), auth: false }
       );
+    },
+
+    poll: async (input: OAuthConnectPollInput): Promise<OAuthConnectPollResponse> => {
+      assertPollInput(input);
+      const appId = this.resolveAppId(input.appId);
+      const intervalMs = input.pollIntervalMs ?? 5000;
+      const maxAttempts = input.maxAttempts ?? 120;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        try {
+          return await this.request<OAuthConnectPollResponse>(
+            "POST",
+            `/apps/${encodeURIComponent(appId)}/connect/poll`,
+            {
+              body: {
+                provider: input.provider.trim(),
+                poll_state: input.poll_state.trim(),
+              },
+              auth: false,
+            }
+          );
+        } catch (err) {
+          if (!isDeviceAuthorizationPendingError(err) || attempt === maxAttempts - 1) {
+            throw err;
+          }
+          await sleep(intervalMs);
+        }
+      }
+
+      throw new CliodotApiError("Device authorization poll timed out");
     },
 
     buildUrl: (input: OAuthConnectStartInput): string => {
@@ -178,6 +247,24 @@ export class OAuthAppClient {
         url.searchParams.set(key, value);
       }
       return url.toString();
+    },
+
+    isSamlPostBinding: (response: OAuthConnectStartResponse): boolean => {
+      return response.sso_binding === "post" && !!response.saml_request && !!response.relay_state;
+    },
+
+    buildSamlPostForm: (response: OAuthConnectStartResponse): OAuthSamlPostForm | null => {
+      if (!response.saml_request || !response.relay_state || !response.authorization_url) {
+        return null;
+      }
+      if (response.sso_binding && response.sso_binding !== "post") {
+        return null;
+      }
+      return {
+        action: response.authorization_url,
+        samlRequest: response.saml_request,
+        relayState: response.relay_state,
+      };
     },
   };
 
