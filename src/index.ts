@@ -35,6 +35,7 @@ export type {
 export { FlosyncClient, DEFAULT_CLIODOT_BASE_URL } from "./FlosyncClient";
 export type { FlosyncClientConfig } from "./FlosyncClient";
 export { OAuthAppClient } from "./OAuthAppClient";
+export { AuthAppClient } from "./AuthAppClient";
 export { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 export { CliodotApiError } from "./errors";
 export type {
@@ -59,6 +60,8 @@ export type {
   OAuthConnectApi,
   OAuthConnectStartInput,
   OAuthConnectStartResponse,
+  OAuthConnectPollInput,
+  OAuthConnectPollResponse,
   OAuthConnectionIdentity,
   OAuthConnectionResponse,
   OAuthConnectionsApi,
@@ -66,19 +69,48 @@ export type {
   OAuthDeleteResponse,
   OAuthExchangeInput,
   OAuthExchangeResponse,
+  OAuthGrantType,
   OAuthRevokeInput,
   OAuthRevokeResponse,
   OAuthSanitizedConnection,
   OAuthAppRegenerateCredentialsResponse,
+  OAuthSamlPostForm,
+  OAuthSamlSessionFields,
   OAuthTokenFields,
   OAuthTokenResponse,
   OAuthUrls,
 } from "./types/oauth-app.api";
 export {
+  OAuthAppProtocol,
   OAuthConnectionStorage,
   OAuthConnectionStatus,
   OAuthTokenExposurePolicy,
+  OAUTH_GRANT_TYPE_AUTHORIZATION_CODE,
+  OAUTH_GRANT_TYPE_CLIENT_CREDENTIALS,
+  OAUTH_GRANT_TYPE_DEVICE_CODE,
+  OAUTH_GRANT_TYPE_JWT_BEARER,
+  OAUTH_GRANT_TYPE_SAML2_BEARER,
+  OAUTH_GRANT_TYPE_TOKEN_EXCHANGE,
+  isOidcProtocol,
+  isSamlProtocol,
+  normalizeOAuthGrantType,
+  isBrowserAuthorizationResponse,
+  isDeviceConnectResponse,
+  isImmediateConnectResponse,
+  isDeviceAuthorizationPendingError,
+  pollDeviceConnectWithBackoff,
 } from "./types/oauth-app.api";
+export type {
+  AuthAppClientConfig,
+  AuthAppClientApi,
+  AuthMfaApi,
+  AuthUsersApi,
+  AuthMfaStatusResponse,
+  AuthTotpEnrollResponse,
+  AuthTotpVerifyResponse,
+  AuthRecoveryCodesResponse,
+  AuthUpsertUserInput,
+} from "./types/auth-app.api";
 export { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 export { WorkflowBuilder, StepBuilder, StepResult } from "./WorkflowBuilder";
 export { ConnectorBuilder, connector } from "./ConnectorBuilder";

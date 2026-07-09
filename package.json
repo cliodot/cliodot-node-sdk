@@ -1,6 +1,6 @@
 {
   "name": "cliodot",
-  "version": "1.2.0",
+  "version": "1.2.6",
   "description": "SDK for building workflows, APIs, and functions with Cliodot Flowsync",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,6 +12,7 @@
     "dev": "tsc -w",
     "test": "jest",
     "get-oauth-connection-token": "DOTENV_CONFIG_PATH=../.env node -r dotenv/config scripts/get-oauth-connection-token.js",
+    "auth-app-mfa-sdk": "DOTENV_CONFIG_PATH=../.env node -r dotenv/config scripts/auth-app-mfa-sdk.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

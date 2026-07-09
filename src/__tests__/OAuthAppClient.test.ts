@@ -49,7 +49,11 @@ describe("OAuthAppClient", () => {
 
   it("starts connect without S2S auth headers", async () => {
     mockAxiosInstance.mockResolvedValue({
-      data: { ok: true, authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?..." },
+      data: {
+        ok: true,
+        grant_type: "authorization_code",
+        authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?...",
+      },
     });
     const client = createClient();
     const result = await client.connect.start({
@@ -207,11 +211,136 @@ describe("OAuthAppClient", () => {
     });
   });
 
+  it("starts SAML connect and builds POST form fields", async () => {
+    mockAxiosInstance.mockResolvedValue({
+      data: {
+        ok: true,
+        protocol: "saml",
+        authorization_url: "https://idp.example.com/sso",
+        sso_binding: "post",
+        saml_request: "PHNhbWxwOlJlcXVlc3Q...",
+        relay_state: "relay-123",
+      },
+    });
+    const client = createClient();
+    const result = await client.connect.start({
+      provider: "google-sso",
+      redirect_uri: "https://app.example.com/callback",
+    });
+    expect(result.protocol).toBe("saml");
+    expect(client.connect.isSamlPostBinding(result)).toBe(true);
+    expect(client.connect.buildSamlPostForm(result)).toEqual({
+      action: "https://idp.example.com/sso",
+      samlRequest: "PHNhbWxwOlJlcXVlc3Q...",
+      relayState: "relay-123",
+    });
+  });
+
+  it("returns SAML session fields from exchange", async () => {
+    mockAxiosInstance.mockResolvedValue({
+      data: {
+        ok: true,
+        protocol: "saml",
+        connection: {
+          id: "conn_saml",
+          provider: "google-sso",
+          protocol: "saml",
+          status: "active",
+        },
+        name_id: "user@example.com",
+        saml_attributes: { email: "user@example.com", role: "admin" },
+      },
+    });
+    const client = createClient();
+    const result = await client.exchange({ code: "ex_code", connection_id: "conn_saml" });
+    expect(result.protocol).toBe("saml");
+    expect(result.name_id).toBe("user@example.com");
+    expect(result.saml_attributes).toEqual({ email: "user@example.com", role: "admin" });
+  });
+
   it("creates axios client with /oauth base URL", () => {
     createClient({ baseUrl: "https://api.example.com/" });
     expect(mockedAxios.create).toHaveBeenCalledWith(
       expect.objectContaining({
         baseURL: "https://api.example.com/oauth",
+      })
+    );
+  });
+
+  it("starts immediate client_credentials connect", async () => {
+    mockAxiosInstance.mockResolvedValue({
+      data: {
+        ok: true,
+        protocol: "oauth2",
+        grant_type: "client_credentials",
+        exchange_code: "ex_immediate",
+        connection_id: "conn_immediate",
+        redirect_url: "https://app.example.com/callback?code=ex_immediate&connection_id=conn_immediate",
+      },
+    });
+    const client = createClient();
+    const result = await client.connect.start({
+      provider: "m2m",
+      redirect_uri: "https://app.example.com/callback",
+    });
+    expect(result.exchange_code).toBe("ex_immediate");
+    expect(result.connection_id).toBe("conn_immediate");
+  });
+
+  it("polls device connect until complete", async () => {
+    mockAxiosInstance
+      .mockRejectedValueOnce({
+        response: {
+          status: 428,
+          data: { ok: false, error: "authorization_pending", code: "OAUTH_PROVIDER_ERROR" },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          ok: true,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          exchange_code: "ex_device",
+          connection_id: "conn_device",
+        },
+      });
+
+    const client = createClient();
+    const result = await client.connect.poll({
+      provider: "tv-app",
+      poll_state: "poll-state-1",
+      pollIntervalMs: 1,
+    });
+    expect(result.exchange_code).toBe("ex_device");
+    expect(mockAxiosInstance).toHaveBeenCalledTimes(2);
+    expect(mockAxiosInstance).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        method: "POST",
+        url: "/apps/oauth_app_test/connect/poll",
+        data: { provider: "tv-app", poll_state: "poll-state-1" },
+      })
+    );
+  });
+
+  it("passes assertion grants on connect start", async () => {
+    mockAxiosInstance.mockResolvedValue({
+      data: {
+        ok: true,
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        exchange_code: "ex_jwt",
+        connection_id: "conn_jwt",
+      },
+    });
+    const client = createClient();
+    await client.connect.start({
+      provider: "m2m-api",
+      redirect_uri: "https://app.example.com/callback",
+      assertion: "eyJ.assertion",
+    });
+    expect(mockAxiosInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          assertion: "eyJ.assertion",
+        }),
       })
     );
   });
