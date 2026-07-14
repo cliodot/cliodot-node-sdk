@@ -4,6 +4,9 @@ import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error"
 import type {
   AuthAppClientApi,
   AuthAppClientConfig,
+  AuthMagicLinkProviderApi,
+  AuthMagicLinkSendResponse,
+  AuthMagicLinkVerifyResponse,
   AuthMfaApi,
   AuthOtpProviderApi,
   AuthOtpSendInput,
@@ -31,6 +34,12 @@ function assertExternalUserId(externalUserId: string): void {
 function assertCode(code: string): void {
   if (!code?.trim()) {
     throw new CliodotApiError("code is required");
+  }
+}
+
+function assertToken(token: string): void {
+  if (!token?.trim()) {
+    throw new CliodotApiError("token is required");
   }
 }
 
@@ -86,7 +95,58 @@ export class AuthAppClient implements AuthAppClientApi {
     this.providers = {
       emailOtp: this.createOtpProvider("email_otp"),
       smsOtp: this.createOtpProvider("sms_otp"),
+      magicLink: this.createMagicLinkProvider(),
     };
+  }
+
+  private createMagicLinkProvider(): AuthMagicLinkProviderApi {
+    const base = (externalUserId: string) =>
+      `${this.userPath(externalUserId)}/providers/magic_link`;
+
+    return {
+      enroll: (externalUserId, input) =>
+        this.request<AuthMagicLinkSendResponse>("POST", `${base(externalUserId)}/enroll`, input),
+      challenge: (externalUserId, input) =>
+        this.request<AuthMagicLinkSendResponse>("POST", `${base(externalUserId)}/challenge`, input),
+      resend: (externalUserId, input) =>
+        this.request<AuthMagicLinkSendResponse>("POST", `${base(externalUserId)}/resend`, input),
+      verify: (externalUserId, token) => {
+        assertToken(token);
+        return this.request<AuthMagicLinkVerifyResponse>("POST", `${base(externalUserId)}/verify`, {
+          token,
+        });
+      },
+      verifyPublic: (token) => {
+        assertToken(token);
+        return this.verifyMagicLinkPublic(token);
+      },
+      disable: (externalUserId) =>
+        this.request<{ ok: true; disabled: true }>("POST", `${base(externalUserId)}/disable`),
+      status: (externalUserId) =>
+        this.request<AuthOtpStatusResponse>("GET", `${base(externalUserId)}/status`),
+    };
+  }
+
+  private async verifyMagicLinkPublic(token: string): Promise<AuthMagicLinkVerifyResponse> {
+    try {
+      const { data } = await this.axios({
+        method: "POST",
+        url: `/apps/${encodeURIComponent(this.appId)}/magic-link/verify`,
+        data: { token },
+      });
+      if (data?.ok === false) {
+        throw new CliodotApiError(parseApiErrorMessage(data) || "Auth request failed", {
+          data,
+          code: parseApiErrorCode(data),
+        });
+      }
+      return data;
+    } catch (err: any) {
+      if (err instanceof CliodotApiError) {
+        throw err;
+      }
+      throw cliodotApiErrorFromAxios(err, "Request failed: POST magic-link/verify");
+    }
   }
 
   private createOtpProvider(provider: "email_otp" | "sms_otp"): AuthOtpProviderApi {

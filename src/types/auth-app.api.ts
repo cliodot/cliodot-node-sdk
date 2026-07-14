@@ -99,6 +99,36 @@ export type AuthOtpStatusResponse = {
   destination_masked?: string;
 };
 
+export type AuthMagicLinkSendResponse = {
+  ok: true;
+  sent?: boolean;
+  expires_in?: number;
+  challenge_id?: string;
+};
+
+export type AuthMagicLinkVerifyResponse = {
+  ok: true;
+  verified: boolean;
+  method: string;
+  challenge_id?: string;
+  user_reference?: string;
+  expires_at?: string;
+  success_redirect_url?: string;
+  failure_redirect_url?: string;
+  enrollment_status?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type AuthMagicLinkProviderApi = {
+  enroll(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthMagicLinkSendResponse>;
+  challenge(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthMagicLinkSendResponse>;
+  resend(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthMagicLinkSendResponse>;
+  verify(externalUserId: string, token: string): Promise<AuthMagicLinkVerifyResponse>;
+  verifyPublic(token: string): Promise<AuthMagicLinkVerifyResponse>;
+  disable(externalUserId: string): Promise<{ ok: true; disabled: true }>;
+  status(externalUserId: string): Promise<AuthOtpStatusResponse>;
+};
+
 export type AuthOtpProviderApi = {
   enroll(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthOtpSendResponse>;
   challenge(externalUserId: string, input?: AuthOtpSendInput): Promise<AuthOtpSendResponse>;
@@ -111,6 +141,7 @@ export type AuthOtpProviderApi = {
 export type AuthProvidersApi = {
   emailOtp: AuthOtpProviderApi;
   smsOtp: AuthOtpProviderApi;
+  magicLink: AuthMagicLinkProviderApi;
 };
 
 export type AuthMfaApi = {

@@ -116,6 +116,9 @@ export type {
   AuthOtpStatusResponse,
   AuthOtpProviderApi,
   AuthProvidersApi,
+  AuthMagicLinkSendResponse,
+  AuthMagicLinkVerifyResponse,
+  AuthMagicLinkProviderApi,
 } from "./types/auth-app.api";
 export { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 export { WorkflowBuilder, StepBuilder, StepResult } from "./WorkflowBuilder";
