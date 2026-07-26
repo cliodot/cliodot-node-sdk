@@ -77,6 +77,9 @@ All guides, API references, and examples live on **[docs.cliodot.com](https://do
 | Workflows | [docs.cliodot.com/workflows](https://docs.cliodot.com/workflows) |
 | Functions | [docs.cliodot.com/functions](https://docs.cliodot.com/functions) |
 | Connectors | [docs.cliodot.com/connectors](https://docs.cliodot.com/connectors) |
+| Gateway Surface | [SURFACE.md](./SURFACE.md) |
+| Surface internals | [SURFACE_INTERNALS.md](./SURFACE_INTERNALS.md) |
+| Typed connectors | [TYPED_CONNECTOR_EXAMPLES.md](./TYPED_CONNECTOR_EXAMPLES.md) |
 | API client | [docs.cliodot.com/api-client](https://docs.cliodot.com/api-client) |
 | OAuth apps | [docs.cliodot.com/oauth-apps](https://docs.cliodot.com/oauth-apps) |
 | Auth apps (MFA) | [docs.cliodot.com/auth-apps](https://docs.cliodot.com/auth-apps) |
