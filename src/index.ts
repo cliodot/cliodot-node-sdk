@@ -36,6 +36,14 @@ export { FlosyncClient, DEFAULT_CLIODOT_BASE_URL } from "./FlosyncClient";
 export type { FlosyncClientConfig } from "./FlosyncClient";
 export { OAuthAppClient } from "./OAuthAppClient";
 export { AuthAppClient } from "./AuthAppClient";
+export { Surface } from "./Surface";
+export type {
+  SurfaceConfig,
+  SurfaceCatalog,
+  SurfaceOp,
+  SurfaceClient,
+  SurfaceHelpers,
+} from "./Surface";
 export { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 export { CliodotApiError } from "./errors";
 export type {
