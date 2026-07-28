@@ -96,15 +96,26 @@ function parseHttpErrorResponseData(data: unknown): unknown {
 
 function buildHttpStepFailurePayload(err: any): Record<string, any> {
   const res = err?.response;
-  const parsed = parseHttpErrorResponseData(res?.data);
+  const body =
+    err?.data !== undefined
+      ? err.data
+      : res && typeof res === "object" && "data" in res && ("config" in res || "headers" in res || "statusText" in res)
+        ? res.data
+        : res;
+  const parsed = parseHttpErrorResponseData(body);
   const message = err?.message || String(err);
   const out: Record<string, any> = {
     ok: false,
     message,
   };
-  if (res && typeof res.status === "number") {
-    out.status = res.status;
-    if (res.statusText) out.statusText = res.statusText;
+  const status =
+    typeof err?.status === "number"
+      ? err.status
+      : res && typeof res.status === "number"
+        ? res.status
+        : undefined;
+  if (typeof status === "number") {
+    out.status = status;
   }
   if (parsed !== undefined) {
     out.data = parsed;
@@ -113,6 +124,8 @@ function buildHttpStepFailurePayload(err: any): Record<string, any> {
     out.error = (parsed as any).message;
   } else if (typeof parsed === "string" && parsed) {
     out.error = parsed;
+  } else if (parsed && typeof parsed === "object" && parsed !== null && typeof (parsed as any).error === "string") {
+    out.error = (parsed as any).error;
   } else {
     out.error = message;
   }

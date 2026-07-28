@@ -42,17 +42,21 @@ async function renderBodyRecursive(
 function rethrowConnectorHttpError(err: unknown): never {
   if (axios.isAxiosError(err)) {
     const res = err.response;
-    const base = err.message || "Request failed";
-    const wrapped: any = new Error(base);
-    if (res) {
-      wrapped.response = {
-        status: res.status,
-        statusText: res.statusText,
-        headers: res.headers,
-        data: res.data,
-      };
+    const data = res?.data;
+    const message =
+      (data &&
+        typeof data === "object" &&
+        ((typeof (data as any).message === "string" && (data as any).message) ||
+          (typeof (data as any).error === "string" && (data as any).error))) ||
+      err.message ||
+      "Request failed";
+    const wrapped: any = new Error(message);
+    wrapped.status = res?.status;
+    wrapped.response = data;
+    wrapped.data = data;
+    if (data && typeof data === "object" && typeof (data as any).code === "string") {
+      wrapped.code = (data as any).code;
     }
-    wrapped.cause = err;
     throw wrapped;
   }
   throw err;
