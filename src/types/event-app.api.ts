@@ -14,6 +14,7 @@ export type EventPublishOptions = {
   id?: string;
   publisher_id?: string;
   metadata?: Record<string, unknown>;
+  environment?: "dev" | "prod";
 };
 
 export type EventPublishResponse = {
@@ -41,6 +42,9 @@ export type EventUnsubscribeResponse = {
 export type EventListenOptions = {
   events?: string[];
   subscription_id?: string;
+  reconnect?: boolean;
+  reconnectDelayMs?: number;
+  reconnectMaxDelayMs?: number;
 };
 
 export type EventEnvelope = {

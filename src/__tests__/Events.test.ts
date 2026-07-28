@@ -124,4 +124,88 @@ describe("Events", () => {
       })
     );
   });
+
+  it("auto-reconnects listen after stream ends until close", async () => {
+    jest.useFakeTimers();
+    const { EventEmitter } = require("events");
+    const stream1 = new EventEmitter();
+    const stream2 = new EventEmitter();
+    (stream1 as any).destroy = jest.fn();
+    (stream2 as any).destroy = jest.fn();
+
+    mockAxiosInstance
+      .mockResolvedValueOnce({ data: stream1 })
+      .mockResolvedValueOnce({ data: stream2 });
+
+    const client = createClient({ debug: false });
+    const messages: any[] = [];
+    const handle = client.listen({ events: ["order.created"] }, (m) => {
+      messages.push(m);
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    stream1.emit(
+      "data",
+      Buffer.from(
+        'data: {"type":"connected","listener_id":"sse_1","events":["order.created"]}\n\n'
+      )
+    );
+    stream1.emit("end");
+
+    await Promise.resolve();
+    expect(messages).toHaveLength(1);
+
+    await jest.advanceTimersByTimeAsync(1000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stream2.emit(
+      "data",
+      Buffer.from(
+        'data: {"type":"connected","listener_id":"sse_2","events":["order.created"]}\n\n'
+      )
+    );
+    expect(messages).toHaveLength(2);
+    expect(mockAxiosInstance).toHaveBeenCalledTimes(2);
+
+    handle.close();
+    jest.useRealTimers();
+  });
+
+  it("does not reconnect when reconnect is false", async () => {
+    jest.useFakeTimers();
+    const { EventEmitter } = require("events");
+    const stream1 = new EventEmitter();
+    (stream1 as any).destroy = jest.fn();
+    mockAxiosInstance.mockResolvedValueOnce({ data: stream1 });
+
+    const client = createClient();
+    client.listen({ events: ["order.created"], reconnect: false }, () => {});
+    await Promise.resolve();
+    await Promise.resolve();
+    stream1.emit("end");
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(mockAxiosInstance).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
+  });
+
+
+  it("passes environment on publish", async () => {
+    mockAxiosInstance.mockResolvedValue({
+      data: { ok: true, event_id: "evt_env", accepted: true },
+    });
+    const client = createClient();
+    await client.publish("order.created", { id: "1" }, { environment: "dev" });
+    expect(mockAxiosInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          event: "order.created",
+          environment: "dev",
+        }),
+      })
+    );
+  });
+
 });
