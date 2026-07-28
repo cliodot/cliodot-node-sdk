@@ -36,6 +36,7 @@ export { FlosyncClient, DEFAULT_CLIODOT_BASE_URL } from "./FlosyncClient";
 export type { FlosyncClientConfig } from "./FlosyncClient";
 export { OAuthAppClient } from "./OAuthAppClient";
 export { AuthAppClient } from "./AuthAppClient";
+export { Events } from "./Events";
 export { Surface } from "./Surface";
 export type {
   SurfaceConfig,
@@ -128,6 +129,21 @@ export type {
   AuthMagicLinkVerifyResponse,
   AuthMagicLinkProviderApi,
 } from "./types/auth-app.api";
+export type {
+  EventsConfig,
+  EventsApi,
+  EventPublishOptions,
+  EventPublishResponse,
+  EventSubscribeInput,
+  EventSubscribeResponse,
+  EventUnsubscribeResponse,
+  EventListenOptions,
+  EventListenHandle,
+  EventListenHandler,
+  EventListenMessage,
+  EventListenConnected,
+  EventEnvelope,
+} from "./types/event-app.api";
 export { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 export { WorkflowBuilder, StepBuilder, StepResult } from "./WorkflowBuilder";
 export { ConnectorBuilder, connector } from "./ConnectorBuilder";

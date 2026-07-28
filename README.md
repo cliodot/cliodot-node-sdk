@@ -83,6 +83,7 @@ All guides, API references, and examples live on **[docs.cliodot.com](https://do
 | API client | [docs.cliodot.com/api-client](https://docs.cliodot.com/api-client) |
 | OAuth apps | [docs.cliodot.com/oauth-apps](https://docs.cliodot.com/oauth-apps) |
 | Auth apps (MFA) | [docs.cliodot.com/auth-apps](https://docs.cliodot.com/auth-apps) |
+| Event Apps | [EVENTS.md](./EVENTS.md) |
 
 ## License
 

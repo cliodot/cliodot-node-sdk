@@ -18,6 +18,34 @@ function coerceErrorMessage(message: unknown, fallback: string): string {
   return fallback;
 }
 
+function isAxiosLikeResponse(value: unknown): value is {
+  data?: unknown;
+  status?: number;
+  headers?: unknown;
+  config?: unknown;
+  request?: unknown;
+} {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    "data" in candidate &&
+    ("config" in candidate || "request" in candidate || "headers" in candidate)
+  );
+}
+
+function resolveApiBody(options?: {
+  response?: any;
+  data?: any;
+}): unknown {
+  if (options?.data !== undefined) {
+    return options.data;
+  }
+  if (isAxiosLikeResponse(options?.response)) {
+    return options?.response?.data;
+  }
+  return options?.response;
+}
+
 export class CliodotApiError extends Error {
   readonly status?: number;
   readonly response?: any;
@@ -28,15 +56,22 @@ export class CliodotApiError extends Error {
     message: unknown,
     options?: { status?: number; response?: any; data?: any; code?: string }
   ) {
-    const data = options?.data ?? options?.response?.data;
+    const data = resolveApiBody(options);
     const resolved =
       coerceErrorMessage(message, "") ||
       parseApiErrorMessage(data) ||
       "Request failed";
     super(resolved);
     this.name = "CliodotApiError";
-    this.status = options?.status ?? parseApiErrorStatus(data);
-    this.response = options?.response;
+    this.status =
+      options?.status ??
+      parseApiErrorStatus(
+        data,
+        isAxiosLikeResponse(options?.response)
+          ? options?.response?.status
+          : undefined
+      );
+    this.response = data;
     this.data = data;
     this.code = options?.code ?? parseApiErrorCode(this.data);
     Object.setPrototypeOf(this, new.target.prototype);
@@ -49,6 +84,7 @@ export class CliodotApiError extends Error {
       status: this.status,
       code: this.code,
       data: this.data,
+      response: this.response,
     };
   }
 }
@@ -61,7 +97,6 @@ export function cliodotApiErrorFromAxios(
   const message = parseApiErrorMessage(data) || err?.message || fallbackMessage;
   return new CliodotApiError(message, {
     status: parseApiErrorStatus(data, err?.response?.status),
-    response: err?.response,
     data,
     code: parseApiErrorCode(data),
   });
