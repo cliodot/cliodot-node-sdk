@@ -37,6 +37,7 @@ export type { FlosyncClientConfig } from "./FlosyncClient";
 export { OAuthAppClient } from "./OAuthAppClient";
 export { AuthAppClient } from "./AuthAppClient";
 export { Events } from "./Events";
+export { Webhooks, buildWebhookReceiveUrl, signCliodotWebhookPayload, verifyCliodotWebhookSignature } from "./Webhooks";
 export { Surface } from "./Surface";
 export type {
   SurfaceConfig,
