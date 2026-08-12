@@ -11,6 +11,19 @@ const api = new Surface<CustomerManagement>({
   slug: "payment",
   apiKey: process.env.GATEWAY_API_KEY,
 });
+```
+
+When the gateway has **SDK Identity Provider** set (`sdk.identity.provider`), use an Identity `iak_` (or Identity app secret) instead of the gateway `gw_…` key — same `Surface` shape:
+
+```ts
+const api = new Surface<CustomerManagement>({
+  baseUrl: "https://flash.example.com",
+  slug: "payment",
+  apiKey: process.env.IDENTITY_IAK,
+});
+```
+
+Plain HTTP callers (no Surface / no `X-Cliodot-Client: sdk`) still use gateway auth (`none` / `api_key` / `jwt`) and ignore `sdk.identity.provider`.
 
 const balance = await api.ledger.balance({
   from: "2026-01-01",
@@ -113,6 +126,9 @@ new Surface<T>({
 Surface loads the catalog from `{baseUrl}/{slug}/sdk/surface` (or `{baseUrl}/sdk/surface` if `slug` is omitted and the host already scopes the gateway).
 
 Use the **gateway API key** from generate-key (returned once as `gw_…`). That key authenticates the request and signs SDK attestation.
+
+When **SDK Identity Provider** is designated on the gateway, Surface must use an Identity `iak_` / secret instead. Gateway `gw_…` keys and gateway JWTs are rejected on the SDK path. HTTP-only callers are unchanged.
+
 
 ---
 
