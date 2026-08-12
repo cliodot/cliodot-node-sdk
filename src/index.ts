@@ -37,6 +37,18 @@ export type { FlosyncClientConfig } from "./FlosyncClient";
 export { OAuthAppClient } from "./OAuthAppClient";
 export { AuthAppClient } from "./AuthAppClient";
 export { Events } from "./Events";
+export { MemoryAppClient } from "./MemoryAppClient";
+export { MemoryClient } from "./MemoryClient";
+export { IdentityAppClient } from "./IdentityAppClient";
+export { CommercialAppClient } from "./CommercialAppClient";
+export {
+  verifyIdentityTokenOffline,
+  clearIdentityJwksCache,
+  tokenHasScopes,
+  parseIdentityScopeClaim,
+} from "./identity-offline-verify";
+export { createIdentityTokenCache } from "./identity-token-cache";
+export { Webhooks, buildWebhookReceiveUrl, signCliodotWebhookPayload, verifyCliodotWebhookSignature } from "./Webhooks";
 export { Surface } from "./Surface";
 export type {
   SurfaceConfig,
@@ -144,6 +156,81 @@ export type {
   EventListenConnected,
   EventEnvelope,
 } from "./types/event-app.api";
+export type {
+  MemoryAppClientConfig,
+  MemoryAppClientApi,
+  MemoryClientConfig,
+  MemoryClientApi,
+  MemoryStoreInput,
+  MemoryStoreResponse,
+  MemoryStoreManyInput,
+  MemoryStoreManyResponse,
+  MemoryAddressInput,
+  MemoryUpdateInput,
+  MemoryDeleteInput,
+  MemoryFindInput,
+  MemoryFindResponse,
+  MemorySearchInput,
+  MemorySearchResponse,
+  MemoryCrossSearchInput,
+  MemorySearchHit,
+  MemoryObject,
+  MemorySearchMode,
+  MemoryDeleteMode,
+} from "./types/memory-app.api";
+export type {
+  IdentityAppClientConfig,
+  IdentityAppClientApi,
+  IdentityAuthenticateInput,
+  IdentityAuthenticateResponse,
+  IdentityMeResponse,
+  IdentityVerifyInput,
+  IdentityVerifyResponse,
+  IdentityRefreshInput,
+  IdentityRevokeInput,
+  IdentityRevokeResponse,
+  IdentityJwks,
+  IdentityOfflineVerifyOptions,
+  IdentityOfflineVerifyHs256,
+  IdentityOfflineVerifyRs256,
+  IdentityTokenCacheOptions,
+  IdentityProviderHandle,
+} from "./types/identity-app.api";
+export type {
+  CommercialAppClientConfig,
+  CommercialAppClientApi,
+  CommercialPaginationMeta,
+  CommercialListParams,
+  CommercialCustomer,
+  CommercialFeature,
+  CommercialPlan,
+  CommercialPlanInterval,
+  CommercialPlanEntitlement,
+  CommercialPrice,
+  CommercialSubscription,
+  CommercialCheckInput,
+  CommercialCheckResult,
+  CommercialConsumeInput,
+  CommercialConsumeResult,
+  CommercialStateInput,
+  CommercialStateResult,
+  CommercialListCustomersResponse,
+  CommercialListFeaturesResponse,
+  CommercialListPlansResponse,
+  CommercialListSubscriptionsParams,
+  CommercialListSubscriptionsResponse,
+  CommercialCreateSubscriptionInput,
+  CommercialChangePlanInput,
+  CommercialUpdateSubscriptionStatusInput,
+  CommercialPricingQuoteInput,
+  CommercialPricingQuote,
+  CommercialInitiatePaymentInput,
+  CommercialConfirmPaymentInput,
+  CommercialSeatAssignInput,
+  CommercialLicenseIssueInput,
+  CommercialLicenseValidateInput,
+  CommercialAnalyticsParams,
+} from "./types/commercial-app.api";
 export { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 export { WorkflowBuilder, StepBuilder, StepResult } from "./WorkflowBuilder";
 export { ConnectorBuilder, connector } from "./ConnectorBuilder";

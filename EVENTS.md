@@ -49,6 +49,8 @@ Broker and driver names are never returned to the SDK.
 
 ## Publish
 
+Optional `environment: "dev" | "prod"` (default `"prod"`) routes **workflow** subscribers to the matching workflow env. Webhooks and SSE always receive the event.
+
 ```ts
 await events.publish("order.created", {
   id: "ord_1",
@@ -92,6 +94,8 @@ const handle = events.listen(
 handle.close();
 ```
 
+`listen()` auto-reconnects after disconnects/server restarts (exponential backoff, default 1s → 30s). Pass `reconnect: false` to disable, or tune with `reconnectDelayMs` / `reconnectMaxDelayMs`. Call `handle.close()` to stop reconnecting.
+
 Browser `EventSource` (cannot set custom headers) — use the query-auth URL:
 
 ```ts
@@ -124,4 +128,3 @@ Webhook remains the durable channel. SSE listen is for live SDK consumers.
 | Unsubscribe | DELETE | `/event/v1/subscribe/:subscriptionId` |
 | Listen | GET | `/event/v1/listen` |
 
-Management APIs (portal JWT) stay under `/api-core/cliodot/event-apps` and are not used by this client.

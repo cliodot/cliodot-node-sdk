@@ -69,7 +69,11 @@ function buildCanonical(input: {
   body?: unknown;
 }): string {
   const bodyRaw =
-    input.body === undefined || input.body === null
+    input.body === undefined ||
+    input.body === null ||
+    (typeof input.body === "object" &&
+      !Array.isArray(input.body) &&
+      Object.keys(input.body as object).length === 0)
       ? ""
       : typeof input.body === "string"
         ? input.body
@@ -83,14 +87,44 @@ function buildCanonical(input: {
   ].join(".");
 }
 
+function sanitizePathParamKey(name: string): string {
+  return String(name || "")
+    .replace(/[^a-zA-Z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
 function fillEndpointPath(template: string, pathParams: Record<string, string>): string {
   let path = template;
-  for (const [name, value] of Object.entries(pathParams)) {
-    path = path
-      .replace(new RegExp(`:${name}\\b`, "g"), encodeURIComponent(value))
-      .replace(new RegExp(`\\{\\{${name}\\}\\}`, "g"), encodeURIComponent(value))
-      .replace(new RegExp(`\\{${name}\\}`, "g"), encodeURIComponent(value));
+  const entries = Object.entries(pathParams).sort((a, b) => b[0].length - a[0].length);
+
+  const replaceName = (current: string, name: string, encoded: string): string => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return current
+      .replace(new RegExp(`:${escaped}(?=$|[/?#&]|[^a-zA-Z0-9_-])`, "g"), encoded)
+      .replace(new RegExp(`\\{\\{\\s*${escaped}\\s*\\}\\}`, "g"), encoded)
+      .replace(new RegExp(`\\{${escaped}\\}`, "g"), encoded);
+  };
+
+  for (const [name, value] of entries) {
+    path = replaceName(path, name, encodeURIComponent(value));
   }
+
+  const remaining = [
+    ...path.matchAll(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}/g),
+    ...path.matchAll(/:([a-zA-Z_][a-zA-Z0-9_-]*)(?=$|[/?#&]|[^a-zA-Z0-9_-])/g),
+    ...path.matchAll(/\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g),
+  ].map((match) => match[1]);
+
+  for (const placeholder of remaining) {
+    const normalizedPlaceholder = sanitizePathParamKey(placeholder);
+    const match = entries.find(
+      ([key]) => sanitizePathParamKey(key) === normalizedPlaceholder
+    );
+    if (!match) continue;
+    path = replaceName(path, placeholder, encodeURIComponent(match[1]));
+  }
+
   if (!path.startsWith("/")) path = `/${path}`;
   return path;
 }

@@ -97,6 +97,9 @@ export class Events implements EventsApi {
     if (options.metadata !== undefined) {
       body.metadata = options.metadata;
     }
+    if (options.environment !== undefined) {
+      body.environment = options.environment;
+    }
     return this.request<EventPublishResponse>("POST", "/v1/publish", body);
   }
 
@@ -167,69 +170,160 @@ export class Events implements EventsApi {
         .join(",");
     }
 
-    const controller = new AbortController();
+    const reconnect = options.reconnect !== false;
+    const initialDelayMs = Math.max(100, options.reconnectDelayMs ?? 1000);
+    const maxDelayMs = Math.max(
+      initialDelayMs,
+      options.reconnectMaxDelayMs ?? 30000
+    );
+
     let closed = false;
+    let controller: AbortController | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
     let buffer = "";
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    };
 
     const close = () => {
       if (closed) return;
       closed = true;
-      controller.abort();
+      clearReconnectTimer();
+      controller?.abort();
+      controller = null;
     };
 
-    void this.axios({
-      method: "GET",
-      url: "/v1/listen",
-      headers: {
-        ...this.buildAuthHeaders(),
-        Accept: "text/event-stream",
-      },
-      params,
-      responseType: "stream",
-      signal: controller.signal,
-      timeout: 0,
-    })
-      .then((response) => {
-        const stream = response.data as NodeJS.ReadableStream;
-        stream.on("data", (chunk: Buffer | string) => {
-          if (closed) return;
-          buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-          const parts = buffer.split("\n");
-          buffer = parts.pop() ?? "";
-          for (const line of parts) {
-            const trimmed = line.trimEnd();
-            if (!trimmed || trimmed.startsWith(":")) continue;
-            if (!trimmed.startsWith("data:")) continue;
-            const raw = trimmed.slice(5).trim();
-            if (!raw) continue;
-            try {
-              const message = JSON.parse(raw) as EventListenMessage;
-              handler(message);
-            } catch {
-              if (this.debug) {
-                console.warn("[Events] failed to parse SSE data", raw);
+    const scheduleReconnect = () => {
+      if (closed || !reconnect) return;
+      clearReconnectTimer();
+      const delay = Math.min(
+        maxDelayMs,
+        initialDelayMs * Math.pow(2, Math.min(attempt, 8))
+      );
+      attempt += 1;
+      if (this.debug) {
+        console.warn(
+          `[Events] listen disconnected; reconnecting in ${delay}ms (attempt ${attempt})`
+        );
+      }
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!closed) {
+          void connect();
+        }
+      }, delay);
+    };
+
+    const connect = async () => {
+      if (closed) return;
+      controller?.abort();
+      controller = new AbortController();
+      buffer = "";
+      const signal = controller.signal;
+
+      try {
+        const response = await this.axios({
+          method: "GET",
+          url: "/v1/listen",
+          headers: {
+            ...this.buildAuthHeaders(),
+            Accept: "text/event-stream",
+          },
+          params,
+          responseType: "stream",
+          signal,
+          timeout: 0,
+        });
+
+        if (closed) {
+          const stream = response.data as any;
+          if (typeof stream.destroy === "function") {
+            stream.destroy();
+          }
+          return;
+        }
+
+        attempt = 0;
+        const stream = response.data as any;
+
+        await new Promise<void>((resolve) => {
+          const onData = (chunk: Buffer | string) => {
+            if (closed) return;
+            buffer +=
+              typeof chunk === "string" ? chunk : chunk.toString("utf8");
+            const parts = buffer.split("\n");
+            buffer = parts.pop() ?? "";
+            for (const line of parts) {
+              const trimmed = line.trimEnd();
+              if (!trimmed || trimmed.startsWith(":")) continue;
+              if (!trimmed.startsWith("data:")) continue;
+              const raw = trimmed.slice(5).trim();
+              if (!raw) continue;
+              try {
+                const message = JSON.parse(raw) as EventListenMessage;
+                handler(message);
+              } catch {
+                if (this.debug) {
+                  console.warn("[Events] failed to parse SSE data", raw);
+                }
               }
             }
-          }
+          };
+
+          const cleanup = () => {
+            stream.off("data", onData);
+            stream.off("error", onError);
+            stream.off("end", onEnd);
+            stream.off("close", onEnd);
+          };
+
+          const onError = (err: Error) => {
+            cleanup();
+            if (closed || (err as any)?.name === "AbortError") {
+              resolve();
+              return;
+            }
+            if (this.debug) {
+              console.error("[Events] listen stream error", err);
+            }
+            resolve();
+          };
+
+          const onEnd = () => {
+            cleanup();
+            resolve();
+          };
+
+          stream.on("data", onData);
+          stream.on("error", onError);
+          stream.on("end", onEnd);
+          stream.on("close", onEnd);
         });
-        stream.on("error", (err: Error) => {
-          if (closed || (err as any)?.name === "AbortError") return;
-          if (this.debug) {
-            console.error("[Events] listen stream error", err);
-          }
-        });
-        stream.on("end", () => {
-          closed = true;
-        });
-      })
-      .catch((err: any) => {
-        if (closed || err?.name === "AbortError" || err?.code === "ERR_CANCELED") {
+
+        if (!closed) {
+          scheduleReconnect();
+        }
+      } catch (err: any) {
+        if (
+          closed ||
+          err?.name === "AbortError" ||
+          err?.code === "ERR_CANCELED"
+        ) {
           return;
         }
         if (this.debug) {
           console.error("[Events] listen failed", err);
         }
-      });
+        scheduleReconnect();
+      }
+    };
+
+    void connect();
 
     return { close };
   }
