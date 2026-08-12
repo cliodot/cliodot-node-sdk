@@ -78,13 +78,92 @@ All guides, API references, and examples live on **[docs.cliodot.com](https://do
 | Functions | [docs.cliodot.com/functions](https://docs.cliodot.com/functions) |
 | Connectors | [docs.cliodot.com/connectors](https://docs.cliodot.com/connectors) |
 | Gateway Surface | [SURFACE.md](./SURFACE.md) |
+| Identity Apps | [IDENTITY.md](./IDENTITY.md) |
 | Surface internals | [SURFACE_INTERNALS.md](./SURFACE_INTERNALS.md) |
 | Typed connectors | [TYPED_CONNECTOR_EXAMPLES.md](./TYPED_CONNECTOR_EXAMPLES.md) |
 | API client | [docs.cliodot.com/api-client](https://docs.cliodot.com/api-client) |
 | OAuth apps | [docs.cliodot.com/oauth-apps](https://docs.cliodot.com/oauth-apps) |
 | Auth apps (MFA) | [docs.cliodot.com/auth-apps](https://docs.cliodot.com/auth-apps) |
 | Event Apps | [EVENTS.md](./EVENTS.md) |
+| Memory Apps | [MEMORY.md](./MEMORY.md) |
+| Commercial Apps | [COMMERCIAL.md](./COMMERCIAL.md) |
 
 ## License
 
 MIT
+
+
+## Identity Apps
+
+Runtime client for application-to-application identity:
+
+```ts
+import { IdentityAppClient } from "cliodot";
+
+const identity = new IdentityAppClient({
+  baseUrl: process.env.CLIODOT_BASE_URL!,
+  appId: "identity_payroll",
+  apiKey: process.env.IDENTITY_APP_API_KEY!,
+});
+
+await identity.authenticate({ target_app_id: "identity_hrms" });
+```
+
+See [IDENTITY.md](./IDENTITY.md).
+
+## Memory Apps
+
+Runtime Learn + Recall clients:
+
+```ts
+import { MemoryAppClient } from "cliodot";
+
+const memory = new MemoryAppClient({
+  baseUrl: process.env.CLIODOT_BASE_URL!,
+  appId: process.env.MEMORY_APP_ID!,
+  apiKey: process.env.MEMORY_APP_API_KEY!,
+});
+
+await memory.store({
+  collection: "transactions",
+  id: "TXN-001",
+  content: { customer_id: "CUS-1022", status: "failed" },
+});
+
+await memory.get({ collection: "transactions", id: "TXN-001" });
+
+await memory.search({
+  apps: ["customer-memory", "finance-memory"],
+  query: "Why did James stop paying?",
+});
+```
+
+See [MEMORY.md](./MEMORY.md).
+
+## Commercial Apps
+
+Runtime client for entitlements, usage, and catalog reads:
+
+```ts
+import { CommercialAppClient } from "cliodot";
+
+const commercial = new CommercialAppClient({
+  baseUrl: process.env.CLIODOT_BASE_URL!,
+  appId: process.env.COMMERCIAL_APP_ID!,
+  apiKey: process.env.COMMERCIAL_APP_API_KEY!,
+});
+
+await commercial.check({ customer: "acme-corp", feature: "api_calls" });
+await commercial.createSubscription({
+  customer: "acme-corp",
+  plan: "pro",
+  payment_input: { email: "billing@acme.com" },
+});
+await commercial.initiatePayment({
+  customer: "acme-corp",
+  input: { email: "billing@acme.com" },
+});
+await commercial.getCustomerSubscription("acme-corp");
+```
+
+See [COMMERCIAL.md](./COMMERCIAL.md).
