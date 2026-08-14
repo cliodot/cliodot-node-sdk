@@ -164,6 +164,9 @@ const { subscription } = await commercial.createSubscription({
   tax_rate: "ng-vat",
   seats_purchased: 8,
   addons: [{ key: "extra_seat", quantity: 1 }],
+  auto_renew: true,
+  renewal_mode: "platform",
+  skip_trial: false,
   metadata: { source: "api" },
   payment_input: {
     email: "billing@acme.com",
@@ -181,7 +184,12 @@ await commercial.subscribe({
 
 Maps to `POST /commercial/v1/subscriptions`.
 
-Prefer `quote` first for totals preview, then `createSubscription` with the same pricing fields. `payment_input` values fill portal mappings with `source: "input"`.
+- `auto_renew` defaults `true`. When `false`, no renew charge; expires at period end.
+- `renewal_mode`: `platform` (charge scanner) or `provider` (confirm sync only). Defaults from body → payment method → `platform`.
+- `skip_trial: true` skips trial even if the plan has `trial_days`; payment-due creates often land in `pending` until `confirmPayment`.
+- Response includes `pricing` (quote totals + line items). Prefer `quote` first for preview, then `createSubscription` with the same pricing fields.
+
+`payment_input` values fill portal mappings with `source: "input"`.
 
 ## Payments (connector)
 
@@ -296,12 +304,22 @@ await commercial.listTaxRates();
 await commercial.listAddons();
 ```
 
-## Change plan / status
+## Change plan / status / pending update
 
 ```ts
+await commercial.updatePendingSubscription({
+  subscriptionId: "com_sub_…",
+  plan: "pro",
+  discount_code: "LAUNCH20",
+  auto_renew: true,
+  payment_input: { email: "billing@acme.com" },
+});
+
 await commercial.changePlan({
   subscriptionId: "com_sub_…",
   plan: "enterprise",
+  apply_at: "immediate",
+  usage_rollover: "carry_unused",
   discount_code: "LAUNCH20",
   payment_input: { email: "billing@acme.com" },
 });
@@ -311,6 +329,8 @@ await commercial.updateSubscriptionStatus({
   status: "cancelled",
 });
 ```
+
+`updatePendingSubscription` maps to `PATCH /v1/subscriptions/:id` and only works while status is `pending`.
 
 ## Seats
 

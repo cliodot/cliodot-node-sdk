@@ -38,6 +38,7 @@ import type {
   CommercialStateInput,
   CommercialStateResult,
   CommercialSubscription,
+  CommercialUpdatePendingSubscriptionInput,
   CommercialUpdateSubscriptionStatusInput,
 } from "./types/commercial-app.api";
 
@@ -315,6 +316,10 @@ export class CommercialAppClient implements CommercialAppClientApi {
         metadata: input.metadata,
         payment_method: input.payment_method,
         payment_input: input.payment_input,
+        auto_renew: input.auto_renew,
+        renewal_mode: input.renewal_mode,
+        skip_trial: input.skip_trial,
+        usage_rollover: input.usage_rollover,
       },
     });
   }
@@ -323,6 +328,34 @@ export class CommercialAppClient implements CommercialAppClientApi {
     input: CommercialCreateSubscriptionInput
   ): Promise<{ ok: true; subscription: CommercialSubscription }> {
     return this.createSubscription(input);
+  }
+
+  updatePendingSubscription(
+    input: CommercialUpdatePendingSubscriptionInput
+  ): Promise<{ ok: true; subscription: CommercialSubscription }> {
+    if (!input?.subscriptionId?.trim()) {
+      throw new CliodotApiError("subscriptionId is required");
+    }
+    return this.request(
+      "PATCH",
+      `/v1/subscriptions/${encodeURIComponent(input.subscriptionId.trim())}`,
+      {
+        body: {
+          plan: input.plan,
+          currency: input.currency,
+          discount_code: input.discount_code,
+          tax_rate: input.tax_rate,
+          addons: input.addons,
+          seats_purchased: input.seats_purchased,
+          payment_method: input.payment_method,
+          payment_input: input.payment_input,
+          auto_renew: input.auto_renew,
+          renewal_mode: input.renewal_mode,
+          skip_trial: input.skip_trial,
+          metadata: input.metadata,
+        },
+      }
+    );
   }
 
   changePlan(
@@ -344,6 +377,10 @@ export class CommercialAppClient implements CommercialAppClientApi {
           seats_purchased: input.seats_purchased,
           payment_method: input.payment_method,
           payment_input: input.payment_input,
+          auto_renew: input.auto_renew,
+          renewal_mode: input.renewal_mode,
+          apply_at: input.apply_at,
+          usage_rollover: input.usage_rollover,
         },
       }
     );
