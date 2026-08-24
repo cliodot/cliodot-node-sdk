@@ -39,6 +39,7 @@ export type CommercialCustomer = {
     line1?: string;
     postal_code?: string;
   };
+  credit_balances?: Array<{ currency: string; amount: number }>;
   metadata?: Record<string, unknown>;
   createdAt?: string | Date;
   updatedAt?: string | Date;
@@ -76,6 +77,8 @@ export type CommercialPlanEntitlement = {
   feature_key: string;
   enabled: boolean;
   limit: number | null;
+  unit_prices?: CommercialPrice[];
+  topup_packs?: Array<{ units: number; prices: CommercialPrice[] }>;
 };
 
 export type CommercialPrice = {
@@ -113,6 +116,15 @@ export type CommercialPlan = {
   entitlements: CommercialPlanEntitlement[];
   trial_days?: number;
   allowed_addon_keys?: string[];
+  billing_mode?: "recurring" | "payg" | "hybrid" | string;
+  payg_overage_policy?:
+    | "deny"
+    | "accrue"
+    | "immediate_topup"
+    | "accrue_and_topup"
+    | string;
+  payg_charge_threshold_amount?: number;
+  payg_hard_cap_amount?: number;
   metadata?: Record<string, unknown>;
 };
 
@@ -169,6 +181,24 @@ export type CommercialSubscription = {
   usage_rollover?: "none" | "carry_unused";
   pending_plan_change?: Record<string, unknown> | null;
   usage_rollover_credits?: Record<string, number>;
+  billing_mode?: "recurring" | "payg" | "hybrid" | string;
+  payg_overage_policy?:
+    | "deny"
+    | "accrue"
+    | "immediate_topup"
+    | "accrue_and_topup"
+    | string;
+  payg_charge_threshold_amount?: number;
+  payg_hard_cap_amount?: number;
+  unbilled_usage?: {
+    currency: string;
+    amount: number;
+    units_by_feature?: Record<string, number>;
+    since?: string | Date;
+  };
+  payg_charge_status?: "idle" | "processing" | "failed" | string;
+  payg_pack_credits?: Record<string, number>;
+  pending_topup_invoice_id?: string;
   trial_starts_at?: string | Date | null;
   trial_ends_at?: string | Date | null;
   starts_at?: string | Date | null;
@@ -216,6 +246,14 @@ export type CommercialCheckResult = {
     purchased: number;
     assigned: number;
     available: number;
+  };
+  topup_packs?: Array<{ units: number; prices: CommercialPrice[] }>;
+  pending_topup_invoice_id?: string;
+  unbilled?: { currency: string; amount: number };
+  payg?: {
+    billing_mode: string;
+    overage_policy: string;
+    charge_status: string;
   };
 };
 
@@ -495,6 +533,23 @@ export type CommercialSeatAssignInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type CommercialEntitlementTopupInput = {
+  subscriptionId: string;
+  feature: string;
+  pack_units?: number;
+  pack_index?: number;
+  payment_method?: string;
+  payment_input?: Record<string, unknown>;
+};
+
+export type CommercialCreditsTopupInput = {
+  customerId: string;
+  currency: string;
+  amount: number;
+  payment_method?: string;
+  payment_input?: Record<string, unknown>;
+};
+
 export type CommercialLicenseIssueInput = {
   customer: string;
   expires_at?: string;
@@ -539,6 +594,12 @@ export type CommercialAppClientApi = {
   createCustomer(
     input: CommercialCreateCustomerInput
   ): Promise<{ ok: true; customer: CommercialCustomer }>;
+  listCredits(
+    customerId: string
+  ): Promise<{ ok: true; credit_balances: Array<{ currency: string; amount: number }> }>;
+  topupCredits(
+    input: CommercialCreditsTopupInput
+  ): Promise<{ ok: true; invoice: CommercialInvoice }>;
   listFeatures(
     params?: CommercialListParams
   ): Promise<CommercialListFeaturesResponse>;
@@ -576,6 +637,9 @@ export type CommercialAppClientApi = {
   changePlan(
     input: CommercialChangePlanInput
   ): Promise<{ ok: true; subscription: CommercialSubscription }>;
+  entitlementTopup(
+    input: CommercialEntitlementTopupInput
+  ): Promise<{ ok: true; invoice: CommercialInvoice; subscription: CommercialSubscription }>;
   updateSubscriptionStatus(
     input: CommercialUpdateSubscriptionStatusInput
   ): Promise<{ ok: true; subscription: CommercialSubscription }>;

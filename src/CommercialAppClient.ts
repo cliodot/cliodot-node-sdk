@@ -40,6 +40,8 @@ import type {
   CommercialSubscription,
   CommercialUpdatePendingSubscriptionInput,
   CommercialUpdateSubscriptionStatusInput,
+  CommercialEntitlementTopupInput,
+  CommercialCreditsTopupInput,
 } from "./types/commercial-app.api";
 
 function trimBaseUrl(url: string): string {
@@ -190,6 +192,44 @@ export class CommercialAppClient implements CommercialAppClientApi {
       throw new CliodotApiError("customerId is required");
     }
     return this.request("GET", `/v1/customers/${encodeURIComponent(customerId.trim())}`);
+  }
+
+  listCredits(
+    customerId: string
+  ): Promise<{
+    ok: true;
+    credit_balances: Array<{ currency: string; amount: number }>;
+  }> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/credits`
+    );
+  }
+
+  topupCredits(
+    input: CommercialCreditsTopupInput
+  ): Promise<{ ok: true; invoice: CommercialInvoice }> {
+    if (!input?.customerId?.trim() || !input?.currency?.trim()) {
+      throw new CliodotApiError("customerId and currency are required");
+    }
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      throw new CliodotApiError("amount must be a positive number");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(input.customerId.trim())}/credits/topup`,
+      {
+        body: {
+          currency: input.currency.trim(),
+          amount: input.amount,
+          payment_method: input.payment_method,
+          payment_input: input.payment_input,
+        },
+      }
+    );
   }
 
   createCustomer(
@@ -381,6 +421,31 @@ export class CommercialAppClient implements CommercialAppClientApi {
           renewal_mode: input.renewal_mode,
           apply_at: input.apply_at,
           usage_rollover: input.usage_rollover,
+        },
+      }
+    );
+  }
+
+  entitlementTopup(
+    input: CommercialEntitlementTopupInput
+  ): Promise<{
+    ok: true;
+    invoice: CommercialInvoice;
+    subscription: CommercialSubscription;
+  }> {
+    if (!input?.subscriptionId?.trim() || !input?.feature?.trim()) {
+      throw new CliodotApiError("subscriptionId and feature are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/subscriptions/${encodeURIComponent(input.subscriptionId.trim())}/entitlement-topup`,
+      {
+        body: {
+          feature: input.feature.trim(),
+          pack_units: input.pack_units,
+          pack_index: input.pack_index,
+          payment_method: input.payment_method,
+          payment_input: input.payment_input,
         },
       }
     );
