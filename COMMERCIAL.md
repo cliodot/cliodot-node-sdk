@@ -5,7 +5,7 @@ Runtime client for Cliodot Commercial Apps. Lives in the `cliodot` package (`cli
 Base path: `/commercial`  
 Auth: `x-cliodot-app-id` + Bearer `cak_…` API key, or app secret.
 
-**Portal vs SDK:** Create Commercial apps, features, plans, and the **connector payment method** in the Cliodot portal (JWT management API). This SDK is for **runtime entitlement decisions, catalog reads, quotes, and payment initiation** from your product backend.
+**Portal vs SDK:** Create Commercial apps, features, plans, **destinations** (Event App, webhook, workflow, connector capability), and the **connector payment method** in the Cliodot portal (management API). When a connector has more than one connection/credential, pick `installation_id` on the payment method so charges use that connection. This SDK is for **runtime entitlement decisions, catalog reads, quotes, and payment initiation** from your product backend.
 
 | Client | Use |
 |--------|-----|
@@ -51,7 +51,7 @@ Maps to `POST /commercial/v1/check`.
 
 ## Consume usage
 
-Omit `quantity` to use the feature `default_increment` (usually `1`).
+Omit `quantity` to use the feature `default_increment` (usually `1`). Recurring plans stay hard quota. `payg` / `hybrid` subscriptions price extra units via entitlement `unit_prices` (accrue + threshold/period-end invoice) or pay-now `topup_packs`. Each consume emits `usage.consumed`.
 
 ```ts
 await commercial.consume({
@@ -61,6 +61,31 @@ await commercial.consume({
 ```
 
 Maps to `POST /commercial/v1/consume`.
+
+Pay-now pack (units added only after `confirmPayment`):
+
+```ts
+await commercial.entitlementTopup({
+  subscriptionId: "com_sub_…",
+  feature: "api_calls",
+  pack_units: 100,
+  payment_input: { email: "billing@acme.com" },
+});
+```
+
+Prepaid wallet:
+
+```ts
+await commercial.listCredits("acme-corp");
+await commercial.topupCredits({
+  customerId: "acme-corp",
+  currency: "USD",
+  amount: 5000,
+  payment_input: { email: "billing@acme.com" },
+});
+```
+
+Prefer portal-configured destinations for `usage.charged`, `entitlement.topped_up`, and `credit.*`.
 
 ## Customer subscription / state
 
@@ -186,7 +211,7 @@ Maps to `POST /commercial/v1/subscriptions`.
 
 - `auto_renew` defaults `true`. When `false`, no renew charge; expires at period end.
 - `renewal_mode`: `platform` (charge scanner) or `provider` (confirm sync only). Defaults from body → payment method → `platform`.
-- `skip_trial: true` skips trial even if the plan has `trial_days`; payment-due creates often land in `pending` until `confirmPayment`.
+- `skip_trial: true` skips trial even if the plan has `trial_days`; payment-due creates often land in `pending` until `confirmPayment` (prepaid; needs `commercial_apps_prepaid_enabled`). Amount due + immediate `active` is postpaid (`commercial_apps_postpaid_enabled`).
 - Response includes `pricing` (quote totals + line items). Prefer `quote` first for preview, then `createSubscription` with the same pricing fields.
 
 `payment_input` values fill portal mappings with `source: "input"`.
@@ -363,6 +388,26 @@ await commercial.analyticsCharts({ period: "30d" });
 
 Multi-currency: pass `currency: "NGN"` to scope money metrics. Without it, use `summary.revenue.by_currency` / `insights.mrr_by_currency` for native totals and `reporting_total` / `mrr_reporting` for the app reporting currency (FX from portal Settings). Charts expose `revenue_by_currency` / `payments_by_currency` plus a reporting series — do not sum mixed currencies.
 ```
+
+## Lifecycle destinations
+
+Commercial Apps emit lifecycle events (customers, subscriptions, catalog, payments, invoices, seats, licenses, discounts, taxes, usage). Destinations are configured in the **portal**, not this SDK:
+
+- `webhook` — signed HTTPS POST to your URL
+- `webhook_app` — internal Webhook App endpoint
+- `event_app` — publish into an Event App (event name = lifecycle type; then use Event App SDK listen)
+- `workflow` — trigger a workflow
+- `capability` — invoke a connector action
+
+Empty `event_types` means all events. Runtime catalog: `GET /commercial/v1/event-types`.
+
+`payment.initiated` payload includes `charge` (the provider response — checkout URL, access_code, client_secret), plus `invoice`, `payment`, `customer`, and `subscription` objects. Other money events carry the same objects, not ids only.
+
+Prepaid / postpaid / pay-as-you-go reuse existing types (no `prepaid.*` / `postpaid.*`):
+
+- Prepaid: `subscription.created` (`payload.status` = `pending`) → `payment.*` / `invoice.*` → `subscription.activated`
+- Postpaid: `subscription.created` + `subscription.activated`; later `invoice.*` / `payment.*` / `subscription.renewed`
+- Pay as you go / hybrid: `usage.consumed` on every consume; `usage.charged` / `usage.charge_failed` for standalone usage invoices (threshold or period end); `entitlement.topped_up` after a paid pack; `credit.purchased` / `credit.drawn` for the prepaid wallet
 
 ## API reference
 
