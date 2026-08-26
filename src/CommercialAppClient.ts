@@ -42,6 +42,24 @@ import type {
   CommercialUpdateSubscriptionStatusInput,
   CommercialEntitlementTopupInput,
   CommercialCreditsTopupInput,
+  CommercialChargeUsageInput,
+  CommercialChargeUsageResult,
+  CommercialRenewSubscriptionInput,
+  CommercialRenewSubscriptionResult,
+  CommercialListCreditsParams,
+  CommercialListCreditsResponse,
+  CommercialAddCardInput,
+  CommercialCustomerCard,
+  CommercialListCardsParams,
+  CommercialListCardsResponse,
+  CommercialListEventsParams,
+  CommercialListEventsResponse,
+  CommercialListUsageEventsResponse,
+  CommercialDiscount,
+  CommercialTaxRate,
+  CommercialAddon,
+  CommercialSeatAssignment,
+  CommercialLicense,
 } from "./types/commercial-app.api";
 
 function trimBaseUrl(url: string): string {
@@ -195,17 +213,16 @@ export class CommercialAppClient implements CommercialAppClientApi {
   }
 
   listCredits(
-    customerId: string
-  ): Promise<{
-    ok: true;
-    credit_balances: Array<{ currency: string; amount: number }>;
-  }> {
+    customerId: string,
+    params?: CommercialListCreditsParams
+  ): Promise<CommercialListCreditsResponse> {
     if (!customerId?.trim()) {
       throw new CliodotApiError("customerId is required");
     }
     return this.request(
       "GET",
-      `/v1/customers/${encodeURIComponent(customerId.trim())}/credits`
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/credits`,
+      { params: cleanParams(params as Record<string, unknown>) }
     );
   }
 
@@ -226,9 +243,80 @@ export class CommercialAppClient implements CommercialAppClientApi {
           currency: input.currency.trim(),
           amount: input.amount,
           payment_method: input.payment_method,
+          card: input.card,
+          card_id: input.card_id,
           payment_input: input.payment_input,
         },
       }
+    );
+  }
+
+  listCards(
+    customerId: string,
+    params?: CommercialListCardsParams
+  ): Promise<CommercialListCardsResponse> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/cards`,
+      { params: cleanParams(params as Record<string, unknown>) }
+    );
+  }
+
+  addCard(
+    customerId: string,
+    input: CommercialAddCardInput = {}
+  ): Promise<{ ok: true; card: CommercialCustomerCard }> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/cards`,
+      { body: input }
+    );
+  }
+
+  updateCard(
+    customerId: string,
+    cardId: string,
+    input: CommercialAddCardInput = {}
+  ): Promise<{ ok: true; card: CommercialCustomerCard }> {
+    if (!customerId?.trim() || !cardId?.trim()) {
+      throw new CliodotApiError("customerId and cardId are required");
+    }
+    return this.request(
+      "PATCH",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/cards/${encodeURIComponent(cardId.trim())}`,
+      { body: input }
+    );
+  }
+
+  removeCard(
+    customerId: string,
+    cardId: string
+  ): Promise<{ ok: true; card: CommercialCustomerCard }> {
+    if (!customerId?.trim() || !cardId?.trim()) {
+      throw new CliodotApiError("customerId and cardId are required");
+    }
+    return this.request(
+      "DELETE",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/cards/${encodeURIComponent(cardId.trim())}`
+    );
+  }
+
+  setDefaultCard(
+    customerId: string,
+    cardId: string
+  ): Promise<{ ok: true; card: CommercialCustomerCard }> {
+    if (!customerId?.trim() || !cardId?.trim()) {
+      throw new CliodotApiError("customerId and cardId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/cards/${encodeURIComponent(cardId.trim())}/default`
     );
   }
 
@@ -355,6 +443,8 @@ export class CommercialAppClient implements CommercialAppClientApi {
         seats_purchased: input.seats_purchased,
         metadata: input.metadata,
         payment_method: input.payment_method,
+        card: input.card,
+        card_id: input.card_id,
         payment_input: input.payment_input,
         auto_renew: input.auto_renew,
         renewal_mode: input.renewal_mode,
@@ -388,6 +478,8 @@ export class CommercialAppClient implements CommercialAppClientApi {
           addons: input.addons,
           seats_purchased: input.seats_purchased,
           payment_method: input.payment_method,
+          card: input.card,
+          card_id: input.card_id,
           payment_input: input.payment_input,
           auto_renew: input.auto_renew,
           renewal_mode: input.renewal_mode,
@@ -416,6 +508,8 @@ export class CommercialAppClient implements CommercialAppClientApi {
           addons: input.addons,
           seats_purchased: input.seats_purchased,
           payment_method: input.payment_method,
+          card: input.card,
+          card_id: input.card_id,
           payment_input: input.payment_input,
           auto_renew: input.auto_renew,
           renewal_mode: input.renewal_mode,
@@ -445,10 +539,88 @@ export class CommercialAppClient implements CommercialAppClientApi {
           pack_units: input.pack_units,
           pack_index: input.pack_index,
           payment_method: input.payment_method,
+          card: input.card,
+          card_id: input.card_id,
           payment_input: input.payment_input,
         },
       }
     );
+  }
+
+  chargeUsage(
+    input: CommercialChargeUsageInput
+  ): Promise<CommercialChargeUsageResult> {
+    if (!input?.subscriptionId?.trim()) {
+      throw new CliodotApiError("subscriptionId is required");
+    }
+    return this.request(
+      "POST",
+      `/v1/subscriptions/${encodeURIComponent(input.subscriptionId.trim())}/charge-usage`,
+      {
+        body: {
+          amount: input.amount,
+          payment_method: input.payment_method,
+          card: input.card,
+          card_id: input.card_id,
+          payment_input: input.payment_input,
+        },
+      }
+    );
+  }
+
+  renewSubscription(
+    input: CommercialRenewSubscriptionInput
+  ): Promise<CommercialRenewSubscriptionResult> {
+    if (!input?.subscriptionId?.trim()) {
+      throw new CliodotApiError("subscriptionId is required");
+    }
+    return this.request(
+      "POST",
+      `/v1/subscriptions/${encodeURIComponent(input.subscriptionId.trim())}/renew`,
+      {
+        body: {
+          payment_method: input.payment_method,
+        },
+      }
+    );
+  }
+
+  renew(
+    input: CommercialRenewSubscriptionInput
+  ): Promise<CommercialRenewSubscriptionResult> {
+    return this.renewSubscription(input);
+  }
+
+  listEvents(
+    customerId: string,
+    params?: CommercialListEventsParams
+  ): Promise<CommercialListEventsResponse> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/events`,
+      { params: cleanParams(params as Record<string, unknown>) }
+    );
+  }
+
+  listUsageEvents(
+    customerId: string,
+    params?: CommercialListEventsParams
+  ): Promise<CommercialListUsageEventsResponse> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/usage-events`,
+      { params: cleanParams(params as Record<string, unknown>) }
+    );
+  }
+
+  listEventTypes(): Promise<{ ok: true; event_types: string[] }> {
+    return this.request("GET", "/v1/event-types");
   }
 
   listPaymentMethods(): Promise<{
@@ -470,6 +642,8 @@ export class CommercialAppClient implements CommercialAppClientApi {
         subscription: input.subscription,
         invoice: input.invoice,
         payment_method: input.payment_method,
+        card: input.card,
+        card_id: input.card_id,
         input: input.input,
         currency: input.currency,
         discount_code: input.discount_code,
@@ -519,7 +693,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
     plan: string;
     currency?: string;
     customer?: string;
-  }): Promise<{ ok: true; discount: unknown; quote: unknown }> {
+  }): Promise<{ ok: true; discount: CommercialDiscount; quote: CommercialPricingQuote }> {
     if (!input?.code?.trim() || !input?.plan?.trim()) {
       throw new CliodotApiError("code and plan are required");
     }
@@ -535,7 +709,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
 
   listDiscounts(
     params?: CommercialListParams
-  ): Promise<{ ok: true; discounts: unknown[]; pagination: CommercialPaginationMeta }> {
+  ): Promise<{ ok: true; discounts: CommercialDiscount[]; pagination: CommercialPaginationMeta }> {
     return this.request("GET", "/v1/discounts", {
       params: cleanParams(params as Record<string, unknown>),
     });
@@ -543,7 +717,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
 
   listTaxRates(
     params?: CommercialListParams
-  ): Promise<{ ok: true; tax_rates: unknown[]; pagination: CommercialPaginationMeta }> {
+  ): Promise<{ ok: true; tax_rates: CommercialTaxRate[]; pagination: CommercialPaginationMeta }> {
     return this.request("GET", "/v1/tax-rates", {
       params: cleanParams(params as Record<string, unknown>),
     });
@@ -551,7 +725,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
 
   listAddons(
     params?: CommercialListParams
-  ): Promise<{ ok: true; addons: unknown[]; pagination: CommercialPaginationMeta }> {
+  ): Promise<{ ok: true; addons: CommercialAddon[]; pagination: CommercialPaginationMeta }> {
     return this.request("GET", "/v1/addons", {
       params: cleanParams(params as Record<string, unknown>),
     });
@@ -584,7 +758,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
 
   assignSeat(
     input: CommercialSeatAssignInput
-  ): Promise<{ ok: true; assignment: unknown }> {
+  ): Promise<{ ok: true; assignment: CommercialSeatAssignment }> {
     if (!input?.customer?.trim() || !input?.subject_key?.trim()) {
       throw new CliodotApiError("customer and subject_key are required");
     }
@@ -614,7 +788,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
 
   issueLicense(
     input: CommercialLicenseIssueInput
-  ): Promise<{ ok: true; license: unknown; license_key: string }> {
+  ): Promise<{ ok: true; license: CommercialLicense; license_key: string }> {
     if (!input?.customer?.trim()) {
       throw new CliodotApiError("customer is required");
     }
@@ -638,7 +812,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
     });
   }
 
-  revokeLicense(licenseId: string): Promise<{ ok: true; license: unknown }> {
+  revokeLicense(licenseId: string): Promise<{ ok: true; license: CommercialLicense }> {
     if (!licenseId?.trim()) {
       throw new CliodotApiError("licenseId is required");
     }

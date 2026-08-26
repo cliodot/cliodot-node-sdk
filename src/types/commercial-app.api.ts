@@ -194,11 +194,14 @@ export type CommercialSubscription = {
     currency: string;
     amount: number;
     units_by_feature?: Record<string, number>;
+    amounts_by_feature?: Record<string, number>;
     since?: string | Date;
   };
   payg_charge_status?: "idle" | "processing" | "failed" | string;
   payg_pack_credits?: Record<string, number>;
   pending_topup_invoice_id?: string;
+  payment_method_key?: string;
+  payment_card_id?: string;
   trial_starts_at?: string | Date | null;
   trial_ends_at?: string | Date | null;
   starts_at?: string | Date | null;
@@ -249,12 +252,36 @@ export type CommercialCheckResult = {
   };
   topup_packs?: Array<{ units: number; prices: CommercialPrice[] }>;
   pending_topup_invoice_id?: string;
-  unbilled?: { currency: string; amount: number };
+  unbilled?: {
+    currency: string;
+    amount: number;
+    units_by_feature?: Record<string, number>;
+    amounts_by_feature?: Record<string, number>;
+  };
   payg?: {
     billing_mode: string;
     overage_policy: string;
     charge_status: string;
   };
+  breakdown?: CommercialConsumeBreakdown;
+};
+
+export type CommercialConsumeBreakdown = {
+  feature_key: string;
+  quantity: number;
+  currency?: string;
+  unit_amount?: number | null;
+  cost: number;
+  plan_quantity: number;
+  pack_quantity: number;
+  overage_quantity: number;
+  credited_amount: number;
+  accrued_amount: number;
+  credited_quantity?: number;
+  accrued_quantity?: number;
+  unbilled_after?: number;
+  credit_balance_after?: number;
+  summary: string;
 };
 
 export type CommercialConsumeInput = CommercialCheckInput;
@@ -298,8 +325,8 @@ export type CommercialStateResult = {
     assigned: number;
     available: number;
   };
-  invoices?: unknown[];
-  payments?: unknown[];
+  invoices?: CommercialInvoice[];
+  payments?: Array<Record<string, unknown>>;
 };
 
 export type CommercialListCustomersResponse = {
@@ -334,6 +361,16 @@ export type CommercialListSubscriptionsResponse = {
   pagination: CommercialPaginationMeta;
 };
 
+export type CommercialInvoiceLineItem = {
+  kind: string;
+  description: string;
+  quantity: number;
+  unit_amount: number;
+  amount: number;
+  currency: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type CommercialInvoice = {
   _id: string;
   tenant_id: string;
@@ -351,7 +388,7 @@ export type CommercialInvoice = {
   status: string;
   currency: string;
   amount: number;
-  line_items?: Array<Record<string, unknown>>;
+  line_items?: CommercialInvoiceLineItem[];
   subtotal?: number;
   discount_total?: number;
   tax_total?: number;
@@ -425,6 +462,8 @@ export type CommercialCreateSubscriptionInput = {
   seats_purchased?: number;
   metadata?: Record<string, unknown>;
   payment_method?: string;
+  card?: string;
+  card_id?: string;
   payment_input?: Record<string, unknown>;
   auto_renew?: boolean;
   renewal_mode?: "platform" | "provider";
@@ -441,6 +480,8 @@ export type CommercialChangePlanInput = {
   addons?: Array<{ key: string; quantity: number }>;
   seats_purchased?: number;
   payment_method?: string;
+  card?: string;
+  card_id?: string;
   payment_input?: Record<string, unknown>;
   auto_renew?: boolean;
   renewal_mode?: "platform" | "provider";
@@ -457,6 +498,8 @@ export type CommercialUpdatePendingSubscriptionInput = {
   addons?: Array<{ key: string; quantity: number }>;
   seats_purchased?: number;
   payment_method?: string;
+  card?: string;
+  card_id?: string;
   payment_input?: Record<string, unknown>;
   auto_renew?: boolean;
   renewal_mode?: "platform" | "provider";
@@ -478,6 +521,8 @@ export type CommercialInitiatePaymentInput = {
   subscription?: string;
   invoice?: string;
   payment_method?: string;
+  card?: string;
+  card_id?: string;
   input?: Record<string, unknown>;
   currency?: string;
   discount_code?: string;
@@ -492,8 +537,234 @@ export type CommercialInitiatePaymentResult = {
     currency: string;
     amount: number;
     total?: number;
+    metadata?: Record<string, unknown>;
   };
   charge: unknown;
+  error?: string;
+  failure_reason?: string;
+};
+
+export type CommercialChargeUsageInput = {
+  subscriptionId: string;
+  amount?: number;
+  payment_method?: string;
+  card?: string;
+  card_id?: string;
+  payment_input?: Record<string, unknown>;
+};
+
+export type CommercialChargeUsageResult = CommercialInitiatePaymentResult & {
+  billed_amount: number;
+  unbilled_remaining: number;
+};
+
+export type CommercialRenewSubscriptionInput = {
+  subscriptionId: string;
+  payment_method?: string;
+};
+
+export type CommercialRenewSubscriptionResult = {
+  ok: true;
+  invoice: CommercialInvoice;
+  subscription: CommercialSubscription;
+  created: boolean;
+};
+
+export type CommercialCreditBalance = {
+  currency: string;
+  amount: number;
+};
+
+export type CommercialCreditLedgerEvent = {
+  _id: string;
+  tenant_id: string;
+  app_id: string;
+  customer_id: string;
+  currency: string;
+  delta: number;
+  balance_after: number;
+  reason: string;
+  invoice_id?: string;
+  subscription_id?: string;
+  feature_key?: string;
+  quantity?: number;
+  unit_amount?: number;
+  cost?: number;
+  plan_quantity?: number;
+  pack_quantity?: number;
+  overage_quantity?: number;
+  credited_amount?: number;
+  accrued_amount?: number;
+  summary?: string;
+  at: string | Date;
+  createdAt?: string | Date;
+};
+
+export type CommercialListCreditsParams = CommercialListParams;
+
+export type CommercialListCreditsResponse = {
+  ok: true;
+  credit_balances: CommercialCreditBalance[];
+  events: CommercialCreditLedgerEvent[];
+  pagination: Pick<CommercialPaginationMeta, "totalDocs" | "page" | "limit"> &
+    Partial<CommercialPaginationMeta>;
+};
+
+export type CommercialCustomerCard = {
+  _id: string;
+  tenant_id: string;
+  app_id: string;
+  customer_id: string;
+  token?: string;
+  fingerprint?: string;
+  last4?: string;
+  brand?: string;
+  exp_month?: number;
+  exp_year?: number;
+  payment_method_key?: string;
+  provider_customer_id?: string;
+  is_default: boolean;
+  status: "active" | "expired" | "revoked" | string;
+  metadata?: Record<string, unknown>;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+};
+
+export type CommercialAddCardInput = {
+  token?: string;
+  authorization_code?: string;
+  fingerprint?: string;
+  hash?: string;
+  last4?: string;
+  brand?: string;
+  exp_month?: number;
+  exp_year?: number;
+  payment_method_key?: string;
+  provider_customer_id?: string;
+  is_default?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialListCardsParams = CommercialListParams & {
+  include_revoked?: boolean;
+};
+
+export type CommercialListCardsResponse = {
+  ok: true;
+  cards: CommercialCustomerCard[];
+  pagination: CommercialPaginationMeta;
+};
+
+export type CommercialLifecycleEvent = {
+  _id: string;
+  tenant_id: string;
+  app_id: string;
+  customer_id?: string;
+  subscription_id?: string;
+  type: string;
+  at: string | Date;
+  actor?: string;
+  actor_id?: string;
+  payload?: Record<string, unknown>;
+  createdAt?: string | Date;
+};
+
+export type CommercialUsageEvent = {
+  _id: string;
+  tenant_id: string;
+  app_id: string;
+  customer_id: string;
+  subscription_id?: string;
+  feature_key: string;
+  quantity: number;
+  period_key: string;
+  at: string | Date;
+  allowed: boolean;
+  remaining?: number | null;
+  reason?: string;
+  currency?: string;
+  unit_amount?: number | null;
+  cost?: number;
+  plan_quantity?: number;
+  pack_quantity?: number;
+  overage_quantity?: number;
+  credited_amount?: number;
+  accrued_amount?: number;
+  credited_quantity?: number;
+  accrued_quantity?: number;
+  unbilled_after?: number;
+  credit_balance_after?: number;
+  summary?: string;
+  createdAt?: string | Date;
+};
+
+export type CommercialListEventsParams = CommercialListParams & {
+  type?: string;
+  feature?: string;
+};
+
+export type CommercialListEventsResponse = {
+  ok: true;
+  events: CommercialLifecycleEvent[];
+  pagination: CommercialPaginationMeta;
+};
+
+export type CommercialListUsageEventsResponse = {
+  ok: true;
+  events: CommercialUsageEvent[];
+  pagination: CommercialPaginationMeta;
+};
+
+export type CommercialDiscount = {
+  _id: string;
+  key?: string;
+  code?: string;
+  name?: string;
+  type?: string;
+  percent?: number;
+  amount?: number;
+  currency?: string;
+  duration?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialTaxRate = {
+  _id: string;
+  key?: string;
+  name?: string;
+  percent?: number;
+  inclusive?: boolean;
+  country?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialAddon = {
+  _id: string;
+  key: string;
+  name: string;
+  kind?: string;
+  prices?: CommercialPrice[];
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialSeatAssignment = {
+  _id: string;
+  customer_id: string;
+  subscription_id?: string;
+  subject_key: string;
+  email?: string;
+  metadata?: Record<string, unknown>;
+  assigned_at?: string | Date;
+};
+
+export type CommercialLicense = {
+  _id: string;
+  customer_id: string;
+  license_key_prefix?: string;
+  status: string;
+  plan_key?: string;
+  expires_at?: string | Date | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type CommercialConfirmPaymentInput = {
@@ -539,6 +810,8 @@ export type CommercialEntitlementTopupInput = {
   pack_units?: number;
   pack_index?: number;
   payment_method?: string;
+  card?: string;
+  card_id?: string;
   payment_input?: Record<string, unknown>;
 };
 
@@ -547,6 +820,8 @@ export type CommercialCreditsTopupInput = {
   currency: string;
   amount: number;
   payment_method?: string;
+  card?: string;
+  card_id?: string;
   payment_input?: Record<string, unknown>;
 };
 
@@ -595,11 +870,42 @@ export type CommercialAppClientApi = {
     input: CommercialCreateCustomerInput
   ): Promise<{ ok: true; customer: CommercialCustomer }>;
   listCredits(
-    customerId: string
-  ): Promise<{ ok: true; credit_balances: Array<{ currency: string; amount: number }> }>;
+    customerId: string,
+    params?: CommercialListCreditsParams
+  ): Promise<CommercialListCreditsResponse>;
   topupCredits(
     input: CommercialCreditsTopupInput
   ): Promise<{ ok: true; invoice: CommercialInvoice }>;
+  listCards(
+    customerId: string,
+    params?: CommercialListCardsParams
+  ): Promise<CommercialListCardsResponse>;
+  addCard(
+    customerId: string,
+    input: CommercialAddCardInput
+  ): Promise<{ ok: true; card: CommercialCustomerCard }>;
+  updateCard(
+    customerId: string,
+    cardId: string,
+    input: CommercialAddCardInput
+  ): Promise<{ ok: true; card: CommercialCustomerCard }>;
+  removeCard(
+    customerId: string,
+    cardId: string
+  ): Promise<{ ok: true; card: CommercialCustomerCard }>;
+  setDefaultCard(
+    customerId: string,
+    cardId: string
+  ): Promise<{ ok: true; card: CommercialCustomerCard }>;
+  listEvents(
+    customerId: string,
+    params?: CommercialListEventsParams
+  ): Promise<CommercialListEventsResponse>;
+  listUsageEvents(
+    customerId: string,
+    params?: CommercialListEventsParams
+  ): Promise<CommercialListUsageEventsResponse>;
+  listEventTypes(): Promise<{ ok: true; event_types: string[] }>;
   listFeatures(
     params?: CommercialListParams
   ): Promise<CommercialListFeaturesResponse>;
@@ -640,6 +946,15 @@ export type CommercialAppClientApi = {
   entitlementTopup(
     input: CommercialEntitlementTopupInput
   ): Promise<{ ok: true; invoice: CommercialInvoice; subscription: CommercialSubscription }>;
+  chargeUsage(
+    input: CommercialChargeUsageInput
+  ): Promise<CommercialChargeUsageResult>;
+  renewSubscription(
+    input: CommercialRenewSubscriptionInput
+  ): Promise<CommercialRenewSubscriptionResult>;
+  renew(
+    input: CommercialRenewSubscriptionInput
+  ): Promise<CommercialRenewSubscriptionResult>;
   updateSubscriptionStatus(
     input: CommercialUpdateSubscriptionStatusInput
   ): Promise<{ ok: true; subscription: CommercialSubscription }>;
@@ -664,27 +979,27 @@ export type CommercialAppClientApi = {
     plan: string;
     currency?: string;
     customer?: string;
-  }): Promise<{ ok: true; discount: unknown; quote: unknown }>;
+  }): Promise<{ ok: true; discount: CommercialDiscount; quote: CommercialPricingQuote }>;
   listDiscounts(
     params?: CommercialListParams
-  ): Promise<{ ok: true; discounts: unknown[]; pagination: CommercialPaginationMeta }>;
+  ): Promise<{ ok: true; discounts: CommercialDiscount[]; pagination: CommercialPaginationMeta }>;
   listTaxRates(
     params?: CommercialListParams
-  ): Promise<{ ok: true; tax_rates: unknown[]; pagination: CommercialPaginationMeta }>;
+  ): Promise<{ ok: true; tax_rates: CommercialTaxRate[]; pagination: CommercialPaginationMeta }>;
   listAddons(
     params?: CommercialListParams
-  ): Promise<{ ok: true; addons: unknown[]; pagination: CommercialPaginationMeta }>;
+  ): Promise<{ ok: true; addons: CommercialAddon[]; pagination: CommercialPaginationMeta }>;
   assignSeat(
     input: CommercialSeatAssignInput
-  ): Promise<{ ok: true; assignment: unknown }>;
+  ): Promise<{ ok: true; assignment: CommercialSeatAssignment }>;
   unassignSeat(input: CommercialSeatAssignInput): Promise<{ ok: boolean }>;
   issueLicense(
     input: CommercialLicenseIssueInput
-  ): Promise<{ ok: true; license: unknown; license_key: string }>;
+  ): Promise<{ ok: true; license: CommercialLicense; license_key: string }>;
   validateLicense(
     input: CommercialLicenseValidateInput
-  ): Promise<{ ok: true; valid: boolean; [key: string]: unknown }>;
-  revokeLicense(licenseId: string): Promise<{ ok: true; license: unknown }>;
+  ): Promise<{ ok: true; valid: boolean; license?: CommercialLicense; [key: string]: unknown }>;
+  revokeLicense(licenseId: string): Promise<{ ok: true; license: CommercialLicense }>;
   analytics(params?: CommercialAnalyticsParams): Promise<{ ok: true; analytics: unknown }>;
   analyticsCharts(
     params?: CommercialAnalyticsParams

@@ -9,7 +9,7 @@ Auth: `x-cliodot-app-id` + Bearer `cak_…` API key, or app secret.
 
 | Client | Use |
 |--------|-----|
-| `CommercialAppClient` | check / consume / state, catalog reads, `createCustomer`, `createSubscription` / `subscribe`, `listInvoices` / `getInvoice`, quote/discounts, `initiatePayment` / `confirmPayment`, change-plan, seats, licenses, analytics |
+| `CommercialAppClient` | check / consume / state, catalog, subscribe, invoices, quote, `initiatePayment` / `chargeUsage` / `renew` (`renewSubscription`) / `confirmPayment`, credits, saved cards, usage events, change-plan, seats, licenses, analytics |
 
 Customer refs accept internal id or `customer_key`. Plan/feature refs accept id or key.
 
@@ -60,7 +60,7 @@ await commercial.consume({
 });
 ```
 
-Maps to `POST /commercial/v1/consume`.
+Maps to `POST /commercial/v1/consume`. The response includes `breakdown` (`summary`, `unit_amount`, `cost`, plan/pack/overage quantities, wallet vs accrued). `GET .../customers/:id/credits` returns wallet balances and ledger `events` with the same rate line (`20 api_calls × 200 GBP = 4000`).
 
 Pay-now pack (units added only after `confirmPayment`):
 
@@ -76,13 +76,36 @@ await commercial.entitlementTopup({
 Prepaid wallet:
 
 ```ts
-await commercial.listCredits("acme-corp");
+const { credit_balances, events } = await commercial.listCredits("acme-corp", {
+  page: 1,
+  limit: 20,
+});
 await commercial.topupCredits({
   customerId: "acme-corp",
   currency: "USD",
   amount: 5000,
   payment_input: { email: "billing@acme.com" },
 });
+```
+
+Pay unbilled usage now (does not wait for threshold / period end). Omit `amount` to pay **all**; pass minor units to pay a slice:
+
+```ts
+const { charge, billed_amount, unbilled_remaining } = await commercial.chargeUsage({
+  subscriptionId: "com_sub_…",
+  amount: 2000,
+  payment_input: { email: "billing@acme.com", callback_url: "https://app.example.com/paid" },
+});
+```
+
+`initiatePayment` without `invoice` charges the **plan/subscription quote**, not accrued usage. Use `chargeUsage` for unbilled PAYG. Pass an existing usage `invoice` id to `initiatePayment` only to resume that invoice.
+
+Usage / lifecycle history:
+
+```ts
+await commercial.listUsageEvents("acme-corp", { feature: "api_calls", page: 1 });
+await commercial.listEvents("acme-corp", { page: 1 });
+await commercial.listEventTypes();
 ```
 
 Prefer portal-configured destinations for `usage.charged`, `entitlement.topped_up`, and `credit.*`.
@@ -220,9 +243,26 @@ Maps to `POST /commercial/v1/subscriptions`.
 
 Payment credentials live on an installed Cliodot connector. The portal maps connector action fields to commercial context (`amount`, `plan.key`, …) or runtime `input`. The SDK only sends runtime values + customer/subscription refs.
 
-Use `createSubscription` for checkout. Use `initiatePayment` to charge an existing subscription/invoice without creating a new sub.
+Use `createSubscription` for checkout. Use `initiatePayment` to charge an existing **plan** invoice or to create a subscription/plan quote invoice. It does **not** invoice accrued PAYG usage — use `chargeUsage` for that.
 
-An app can have many payment methods (Paystack, Stripe, bank transfer, etc.). One is marked `is_default`. Omit `payment_method` to use the default; pass a method `key` (or id) to use a specific one.
+An app can have many payment methods (Paystack, Stripe, `stripe-card`, Flutterwave, `paystack-card`, etc.). One is marked `is_default`. Pass `card_id` to charge a saved card — that card’s `payment_method_key` is the connector. Without a card id, omit `payment_method` to use the default, or pass a method `key` (or id).
+
+Saved **customer cards** are the instrument that connector charges. Store provider tokens (`authorization_code`, `pm_…`) plus last4/brand/exp — never PAN or CVV.
+
+```ts
+const { cards } = await commercial.listCards("acme-corp");
+await commercial.addCard("acme-corp", {
+  token: "AUTH_xxx",
+  last4: "4242",
+  brand: "visa",
+  payment_method_key: "paystack",
+  is_default: true,
+});
+await commercial.setDefaultCard("acme-corp", "com_card_…");
+await commercial.removeCard("acme-corp", "com_card_…");
+```
+
+Charge methods accept optional `card` / `card_id`. A card id is enough: the connector is the card’s `payment_method_key` (`stripe-card`, `flutterwave`, `paystack-card`, …). Do not also send `payment_method` — it is ignored when a card id is present. Otherwise the subscription `payment_card_id`, then the customer default (matching connector key) is used. Map Paystack `authorization_code` and Stripe `payment_method` to `{{card.token}}`.
 
 ```ts
 const { payment_methods } = await commercial.listPaymentMethods();
@@ -231,8 +271,11 @@ const { payment_methods } = await commercial.listPaymentMethods();
 await commercial.subscribe({
   customer: "acme-corp",
   plan: "pro",
-  payment_method: "paystack",
-  payment_input: { email: "billing@acme.com" },
+  card_id: "com_card_…",
+  payment_input: {
+    email: "billing@acme.com",
+    return_url: "https://app.example.com/paid",
+  },
 });
 ```
 
@@ -243,7 +286,8 @@ Creates/uses an invoice, runs the mapped connector action (e.g. Paystack Initial
 ```ts
 const { reference, invoice, charge } = await commercial.initiatePayment({
   customer: "acme-corp",
-  // payment_method: "paystack", // optional key/id; defaults to is_default
+  card_id: "com_card_…",
+  // payment_method: "paystack", // only when no card id; key/id, else default
   // subscription: "com_sub_…",
   // invoice: "com_inv_…",
   currency: "NGN",
@@ -270,21 +314,51 @@ Response shape:
 
 Maps to `POST /commercial/v1/payments/initiate`.
 
+### Charge unbilled usage
+
+```ts
+await commercial.chargeUsage({
+  subscriptionId: "com_sub_…",
+  // amount: 2000, // omit = pay all unbilled
+  payment_input: { email: "billing@acme.com" },
+});
+```
+
+Maps to `POST /commercial/v1/subscriptions/:id/charge-usage`. Confirm with `confirmPayment` like any other invoice. Unbilled is reduced only after success.
+
 `input` keys must match portal mappings with `source: "input"` (or `{{input.key}}`). Prefer `{{customer.email}}` in mappings so you do not re-send email.
+
+### Provider renewal (same subscription)
+
+Do **not** create a new subscription. Open a renewal invoice on the current one, then confirm the provider’s charge against that invoice. That confirmation advances the period.
+
+```ts
+const { invoice } = await commercial.renewSubscription({
+  subscriptionId: "com_sub_…",
+});
+
+await commercial.confirmPayment({
+  reference: invoice._id,
+  status: "succeeded",
+  provider_payment_id: "in_123",
+});
+```
+
+`renew` is an alias of `renewSubscription`. Maps to `POST /commercial/v1/subscriptions/:id/renew` then `POST /commercial/v1/payments/confirm`. The invoice is `open` (`metadata.kind` = `renewal`); Cliodot does not run the connector charge. If the scanner already opened one, `renewSubscription` returns it (`created: false`).
 
 ### Confirm payment
 
-Call this from your backend/SDK or frontend after the provider confirms success (webhook, callback, or verify). Until then the invoice stays `processing`.
+Call this from your backend/SDK or frontend after the provider confirms success (webhook, callback, or verify). Until then a platform initiate invoice stays `processing`; a provider renewal invoice stays `open`.
 
 ```ts
 await commercial.confirmPayment({
-  reference,                 // from initiate
+  reference,                 // from initiate or renewSubscription
   status: "succeeded",       // succeeded | failed | pending
   provider_payment_id: "tx_123",
 });
 ```
 
-That marks the invoice `paid` / payment `succeeded` (or failed). Renewals deferred with `renewal_mode: "provider"` use the same confirm path.
+That marks the invoice `paid` / payment `succeeded` (or failed). A `kind: "renewal"` invoice advances the **same** subscription’s period.
 
 Maps to `POST /commercial/v1/payments/confirm`.
 
@@ -302,7 +376,7 @@ await commercial.changePlan({
 });
 ```
 
-Configure connectors + mappings in the portal Payments screen (management JWT). Runtime only selects which method via `payment_method` / default.
+Configure connectors + mappings in the portal Payments screen (management JWT). Runtime selects the connector from `card_id` (card `payment_method_key`), else `payment_method` / default.
 
 ## Pricing quote / discounts
 
