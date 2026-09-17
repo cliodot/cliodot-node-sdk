@@ -144,6 +144,31 @@ export type CommercialSubscription = {
   }>;
   seats_purchased?: number;
   price_metadata?: Record<string, unknown>;
+  pricing?: {
+    currency: string;
+    plan_amount: number;
+    addon_total: number;
+    seat_total: number;
+    subtotal: number;
+    discount_total: number;
+    tax_total: number;
+    total: number;
+    line_items: Array<{
+      kind: string;
+      description: string;
+      quantity: number;
+      unit_amount: number;
+      amount: number;
+      currency: string;
+      metadata?: Record<string, unknown>;
+    }>;
+  };
+  auto_renew?: boolean;
+  renewal_mode?: "platform" | "provider";
+  skip_trial?: boolean;
+  usage_rollover?: "none" | "carry_unused";
+  pending_plan_change?: Record<string, unknown> | null;
+  usage_rollover_credits?: Record<string, number>;
   trial_starts_at?: string | Date | null;
   trial_ends_at?: string | Date | null;
   starts_at?: string | Date | null;
@@ -363,6 +388,10 @@ export type CommercialCreateSubscriptionInput = {
   metadata?: Record<string, unknown>;
   payment_method?: string;
   payment_input?: Record<string, unknown>;
+  auto_renew?: boolean;
+  renewal_mode?: "platform" | "provider";
+  skip_trial?: boolean;
+  usage_rollover?: "none" | "carry_unused";
 };
 
 export type CommercialChangePlanInput = {
@@ -375,6 +404,26 @@ export type CommercialChangePlanInput = {
   seats_purchased?: number;
   payment_method?: string;
   payment_input?: Record<string, unknown>;
+  auto_renew?: boolean;
+  renewal_mode?: "platform" | "provider";
+  apply_at?: "immediate" | "next_renewal";
+  usage_rollover?: "none" | "carry_unused";
+};
+
+export type CommercialUpdatePendingSubscriptionInput = {
+  subscriptionId: string;
+  plan?: string;
+  currency?: string;
+  discount_code?: string;
+  tax_rate?: string;
+  addons?: Array<{ key: string; quantity: number }>;
+  seats_purchased?: number;
+  payment_method?: string;
+  payment_input?: Record<string, unknown>;
+  auto_renew?: boolean;
+  renewal_mode?: "platform" | "provider";
+  skip_trial?: boolean;
+  metadata?: Record<string, unknown>;
 };
 
 export type CommercialPaymentMethodSummary = {
@@ -520,6 +569,9 @@ export type CommercialAppClientApi = {
   ): Promise<{ ok: true; subscription: CommercialSubscription }>;
   subscribe(
     input: CommercialCreateSubscriptionInput
+  ): Promise<{ ok: true; subscription: CommercialSubscription }>;
+  updatePendingSubscription(
+    input: CommercialUpdatePendingSubscriptionInput
   ): Promise<{ ok: true; subscription: CommercialSubscription }>;
   changePlan(
     input: CommercialChangePlanInput
