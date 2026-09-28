@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
 import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error";
+import { applyEnvironmentHeader } from "./http/cliodot-request";
 import type {
   OAuthAppClientConfig,
   OAuthConnectApi,
@@ -111,6 +112,7 @@ export class OAuthAppClient {
   private readonly appId: string;
   private readonly appApiKey?: string;
   private readonly appSecret?: string;
+  private readonly environment?: string;
   private readonly axios: AxiosInstance;
   public readonly debug: boolean;
 
@@ -125,6 +127,7 @@ export class OAuthAppClient {
     this.appId = config.appId.trim();
     this.appApiKey = config.appApiKey?.trim() || undefined;
     this.appSecret = config.appSecret?.trim() || undefined;
+    this.environment = config.environment;
     this.debug = config.debug ?? false;
     this.axios = axios.create({
       baseURL: `${this.baseUrl}/oauth`,
@@ -139,13 +142,19 @@ export class OAuthAppClient {
 
   private buildS2SHeaders(): Record<string, string> {
     if (this.appApiKey) {
-      return { Authorization: `Bearer ${this.appApiKey}` };
+      return applyEnvironmentHeader(
+        { Authorization: `Bearer ${this.appApiKey}` },
+        this.environment
+      );
     }
     if (this.appSecret) {
-      return {
-        "X-Cliodot-App-Id": this.appId,
-        "X-Cliodot-App-Secret": this.appSecret,
-      };
+      return applyEnvironmentHeader(
+        {
+          "X-Cliodot-App-Id": this.appId,
+          "X-Cliodot-App-Secret": this.appSecret,
+        },
+        this.environment
+      );
     }
     throw new CliodotApiError("OAuth app credentials required (appApiKey or appSecret)");
   }

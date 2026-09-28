@@ -1,6 +1,11 @@
 import axios, { AxiosInstance } from "axios";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
 import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error";
+import { applyEnvironmentHeader } from "./http/cliodot-request";
+import {
+  applyInstanceHeader,
+  resolveEventsInstanceId,
+} from "./http/events-instance-id";
 import type {
   EventListenHandle,
   EventListenHandler,
@@ -41,6 +46,8 @@ export class Events implements EventsApi {
   private readonly appId: string;
   private readonly apiKey?: string;
   private readonly appSecret?: string;
+  private readonly environment?: string;
+  readonly instanceId: string;
   private readonly axios: AxiosInstance;
   public readonly debug: boolean;
 
@@ -56,6 +63,11 @@ export class Events implements EventsApi {
     this.apiKey =
       config.apiKey?.trim() || config.appApiKey?.trim() || undefined;
     this.appSecret = config.appSecret?.trim() || undefined;
+    this.environment = config.environment;
+    this.instanceId = resolveEventsInstanceId({
+      appId: this.appId,
+      instanceId: config.instanceId,
+    });
     this.debug = config.debug ?? false;
     this.axios = axios.create({
       baseURL: `${this.baseUrl}/event`,
@@ -109,6 +121,7 @@ export class Events implements EventsApi {
     }
     const body: Record<string, unknown> = {
       events: input.events.map((e) => String(e).trim()).filter(Boolean),
+      instance_id: this.instanceId,
     };
     if (input.name?.trim()) {
       body.name = input.name.trim();
@@ -136,6 +149,7 @@ export class Events implements EventsApi {
       );
     }
     params.set("access_token", token);
+    params.set("instance_id", this.instanceId);
     if (options.subscription_id?.trim()) {
       params.set("subscription_id", options.subscription_id.trim());
     } else if (options.events?.length) {
@@ -160,7 +174,9 @@ export class Events implements EventsApi {
       );
     }
 
-    const params: Record<string, string> = {};
+    const params: Record<string, string> = {
+      instance_id: this.instanceId,
+    };
     if (options.subscription_id?.trim()) {
       params.subscription_id = options.subscription_id.trim();
     } else if (options.events?.length) {
@@ -329,9 +345,15 @@ export class Events implements EventsApi {
   }
 
   private buildAuthHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      "x-cliodot-app-id": this.appId,
-    };
+    const headers: Record<string, string> = applyInstanceHeader(
+      applyEnvironmentHeader(
+        {
+          "x-cliodot-app-id": this.appId,
+        },
+        this.environment
+      ),
+      this.instanceId
+    );
     if (this.apiKey) {
       headers.Authorization = `Bearer ${this.apiKey}`;
       return headers;

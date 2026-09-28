@@ -10,6 +10,7 @@ const api = new Surface<CustomerManagement>({
   baseUrl: "https://flash.example.com",
   slug: "payment",
   apiKey: process.env.GATEWAY_API_KEY,
+  environment: "dev", // optional; omit to follow the project switch
 });
 ```
 

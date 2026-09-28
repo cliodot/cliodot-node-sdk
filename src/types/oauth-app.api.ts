@@ -67,6 +67,8 @@ export interface OAuthAppClientConfig {
   appApiKey?: string;
   appSecret?: string;
   debug?: boolean;
+  /** Pin project env bag for connector auth templates. Omit to follow the project switch. */
+  environment?: "dev" | "prod" | "development" | "production";
 }
 
 export interface OAuthConnectionIdentity {

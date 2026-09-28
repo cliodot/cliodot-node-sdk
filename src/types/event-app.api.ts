@@ -5,6 +5,13 @@ export type EventsConfig = {
   appApiKey?: string;
   appSecret?: string;
   debug?: boolean;
+  /** Pin project env bag for connector auth templates. Omit to follow the project switch. */
+  environment?: "dev" | "prod" | "development" | "production";
+  /**
+   * Override the machine-bound SDK instance id.
+   * Default is stable per computer + Event app; a different computer gets a new id.
+   */
+  instanceId?: string;
 };
 
 export type EventPublishOptions = {
@@ -32,6 +39,7 @@ export type EventSubscribeResponse = {
   ok: true;
   subscription_id: string;
   events: string[];
+  instance_id: string;
 };
 
 export type EventUnsubscribeResponse = {

@@ -36,6 +36,7 @@ const provider = new ProviderServicesClient<AcmeProviders>({
   baseUrl: process.env.CLIODOT_BASE_URL!,
   appId: process.env.PROVIDER_APP_ID!,
   apiKey: process.env.PROVIDER_APP_API_KEY!,
+  environment: "prod", // optional; omit to follow the project switch
 });
 
 const result = await provider.execute({

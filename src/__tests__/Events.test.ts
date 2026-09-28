@@ -20,6 +20,7 @@ describe("Events", () => {
       baseUrl: "https://api.example.com",
       appId: "evt_app_test",
       apiKey: "eak_test_key",
+      instanceId: "test-instance",
       ...overrides,
     });
   }
@@ -49,6 +50,7 @@ describe("Events", () => {
         headers: {
           Authorization: "Bearer eak_test_key",
           "x-cliodot-app-id": "evt_app_test",
+          "x-cliodot-instance-id": "test-instance",
         },
         data: {
           event: "order.created",
@@ -75,10 +77,12 @@ describe("Events", () => {
         headers: {
           "x-cliodot-app-id": "evt_app_test",
           "x-cliodot-app-secret": "secret_1",
+          "x-cliodot-instance-id": "test-instance",
         },
         data: {
           events: ["order.created"],
           name: "checkout",
+          instance_id: "test-instance",
         },
       })
     );
@@ -103,7 +107,7 @@ describe("Events", () => {
     const client = createClient();
     const url = client.listenUrl({ events: ["order.created", "payment.completed"] });
     expect(url).toBe(
-      "https://api.example.com/event/v1/listen?app_id=evt_app_test&access_token=eak_test_key&events=order.created%2Cpayment.completed"
+      "https://api.example.com/event/v1/listen?app_id=evt_app_test&access_token=eak_test_key&instance_id=test-instance&events=order.created%2Cpayment.completed"
     );
   });
 
@@ -208,4 +212,29 @@ describe("Events", () => {
     );
   });
 
+  it("keeps instance id stable for this client and distinct across computers", async () => {
+    mockAxiosInstance.mockResolvedValue({
+      data: {
+        ok: true,
+        subscription_id: "evt_sub_1",
+        events: ["order.created"],
+        instance_id: "test-instance",
+      },
+    });
+    const sameBox = createClient();
+    await sameBox.subscribe({ events: ["order.created"] });
+    await sameBox.subscribe({ events: ["order.created"] });
+    const otherBox = createClient({ instanceId: "other-computer" });
+    await otherBox.subscribe({ events: ["order.created"] });
+
+    const calls = mockAxiosInstance.mock.calls.filter(
+      (c) => c[0]?.url === "/v1/subscribe"
+    );
+    expect(calls).toHaveLength(3);
+    expect(calls[0][0].data.instance_id).toBe("test-instance");
+    expect(calls[1][0].data.instance_id).toBe("test-instance");
+    expect(calls[2][0].data.instance_id).toBe("other-computer");
+    expect(sameBox.instanceId).toBe("test-instance");
+    expect(otherBox.instanceId).not.toBe(sameBox.instanceId);
+  });
 });

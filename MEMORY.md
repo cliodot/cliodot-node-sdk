@@ -31,10 +31,13 @@ const memory = new MemoryAppClient({
   baseUrl: "https://your-host",
   appId: process.env.MEMORY_APP_ID!,
   apiKey: process.env.MEMORY_APP_API_KEY!,
+  environment: "prod", // optional; omit to follow the project switch
 });
 ```
 
 `appApiKey` aliases `apiKey`. App secret via `appSecret` is also supported.
+
+Optional constructor `environment` (`"dev"` \| `"prod"`) sends `x-environment` so connector auth templates resolve against that project env bag. Omit it to follow the project switch. Same option exists on `MemoryClient`.
 
 ## Store
 

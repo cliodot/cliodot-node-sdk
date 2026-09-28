@@ -26,6 +26,7 @@ const identity = new IdentityAppClient({
   baseUrl: "https://your-host",
   appId: "identity_payroll",
   apiKey: process.env.IDENTITY_APP_API_KEY!,
+  environment: "prod", // optional; omit to follow the project switch
 });
 ```
 
@@ -40,6 +41,8 @@ const identity = new IdentityAppClient({
 ```
 
 `appApiKey` is accepted as an alias of `apiKey`.
+
+Optional constructor `environment` (`"dev"` \| `"prod"`) sends `x-environment` so connector auth templates resolve against that project env bag. Omit it to follow the project switch.
 
 ## me
 

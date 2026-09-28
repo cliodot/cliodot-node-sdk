@@ -63,6 +63,7 @@ export class ProviderServicesClient<TCatalog = any> {
   private readonly appId: string;
   private readonly apiKey?: string;
   private readonly appSecret?: string;
+  private readonly environment?: string;
   private readonly axios: AxiosInstance;
   private readonly configError: CliodotStructuredError | null;
   public readonly debug: boolean;
@@ -84,6 +85,7 @@ export class ProviderServicesClient<TCatalog = any> {
     this.apiKey =
       config.apiKey?.trim() || config.appApiKey?.trim() || undefined;
     this.appSecret = config.appSecret?.trim() || undefined;
+    this.environment = config.environment;
     this.debug = config.debug ?? false;
     this.axios = createCliodotAxios({
       baseURL: `${this.baseUrl}/provider`,
@@ -174,6 +176,7 @@ export class ProviderServicesClient<TCatalog = any> {
       appId: this.appId,
       apiKey: this.apiKey,
       appSecret: this.appSecret,
+      environment: this.environment,
       missingMessage:
         "Provider app credentials required (apiKey/appApiKey or appSecret)",
     });

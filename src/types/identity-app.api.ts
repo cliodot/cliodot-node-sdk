@@ -6,6 +6,8 @@ export type IdentityAppClientConfig = {
   appSecret?: string;
   debug?: boolean;
   timeoutMs?: number;
+  /** Pin project env bag for connector auth templates. Omit to follow the project switch. */
+  environment?: "dev" | "prod" | "development" | "production";
 };
 
 export type IdentityAuthenticateInput = {

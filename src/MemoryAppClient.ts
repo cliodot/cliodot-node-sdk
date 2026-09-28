@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
 import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error";
+import { applyEnvironmentHeader } from "./http/cliodot-request";
 import type {
   MemoryAddressInput,
   MemoryAppClientApi,
@@ -27,6 +28,7 @@ export class MemoryAppClient implements MemoryAppClientApi {
   private readonly appId: string;
   private readonly apiKey?: string;
   private readonly appSecret?: string;
+  private readonly environment?: string;
   private readonly axios: AxiosInstance;
   public readonly debug: boolean;
 
@@ -42,6 +44,7 @@ export class MemoryAppClient implements MemoryAppClientApi {
     this.apiKey =
       config.apiKey?.trim() || config.appApiKey?.trim() || undefined;
     this.appSecret = config.appSecret?.trim() || undefined;
+    this.environment = config.environment;
     this.debug = config.debug ?? false;
     this.axios = axios.create({
       baseURL: `${this.baseUrl}/memory`,
@@ -138,9 +141,12 @@ export class MemoryAppClient implements MemoryAppClientApi {
   }
 
   private buildAuthHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      "x-cliodot-app-id": this.appId,
-    };
+    const headers: Record<string, string> = applyEnvironmentHeader(
+      {
+        "x-cliodot-app-id": this.appId,
+      },
+      this.environment
+    );
     if (this.apiKey) {
       headers.Authorization = `Bearer ${this.apiKey}`;
       return headers;

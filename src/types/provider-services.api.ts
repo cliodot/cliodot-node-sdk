@@ -8,6 +8,8 @@ export type ProviderServicesClientConfig = {
   appSecret?: string;
   debug?: boolean;
   timeoutMs?: number;
+  /** Pin project env bag for connector auth templates. Omit to follow the project switch. */
+  environment?: "dev" | "prod" | "development" | "production";
 };
 
 /** Optional execute modifiers (routing pin + version). */
@@ -30,10 +32,23 @@ export type ProviderExecuteInput = ProviderExecuteOptions & {
   input?: Record<string, unknown>;
 };
 
+export type ProviderExecuteError = {
+  code: string;
+  message?: string;
+  errors?: Array<{
+    path: string;
+    message: string;
+    keyword?: string;
+    params?: Record<string, unknown>;
+  }>;
+  mapped?: unknown;
+  provider_response?: unknown;
+};
+
 export type ProviderExecuteAttempt = {
   provider: string;
   ok: boolean;
-  error?: { code: string; message?: string };
+  error?: ProviderExecuteError;
 };
 
 export type ProviderExecuteResult<TResult = Record<string, unknown>> = {
@@ -44,7 +59,7 @@ export type ProviderExecuteResult<TResult = Record<string, unknown>> = {
   provider?: string;
   attempts: ProviderExecuteAttempt[];
   result?: TResult;
-  error?: { code: string; message?: string };
+  error?: ProviderExecuteError;
 };
 
 export type ProviderCatalogPublicError = {

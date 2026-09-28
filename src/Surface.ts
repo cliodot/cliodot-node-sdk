@@ -6,6 +6,7 @@ import {
   parseApiErrorMessage,
   parseApiErrorStatus,
 } from "./http/parse-api-error";
+import { applyEnvironmentHeader } from "./http/cliodot-request";
 
 export interface SurfaceConfig {
   baseUrl: string;
@@ -15,6 +16,8 @@ export interface SurfaceConfig {
   apiKeyHeader?: string;
   fetchSurface?: boolean;
   version?: string;
+  /** Pin project env bag for connector auth templates. Omit to follow the project switch. */
+  environment?: "dev" | "prod" | "development" | "production";
 }
 
 export interface SurfaceOp {
@@ -137,6 +140,7 @@ class SurfaceRuntime {
   private readonly jwt?: string;
   private readonly apiKeyHeader: string;
   private readonly sdkVersion: string;
+  private readonly environment?: string;
   private readonly axios: AxiosInstance;
   private surfacePromise: Promise<SurfaceCatalog> | null = null;
   private surface: SurfaceCatalog | null = null;
@@ -151,6 +155,7 @@ class SurfaceRuntime {
     this.jwt = config.jwt?.trim() || undefined;
     this.apiKeyHeader = config.apiKeyHeader?.trim() || "X-API-Key";
     this.sdkVersion = config.version?.trim() || DEFAULT_SDK_VERSION;
+    this.environment = config.environment;
     this.invokeBaseUrl = this.slug
       ? `${this.rootBaseUrl}/${this.slug}`
       : this.rootBaseUrl;
@@ -201,7 +206,7 @@ class SurfaceRuntime {
     if (this.jwt) {
       headers.Authorization = `Bearer ${this.jwt}`;
     }
-    return headers;
+    return applyEnvironmentHeader(headers, this.environment);
   }
 
   async loadSurface(force = false): Promise<SurfaceCatalog> {

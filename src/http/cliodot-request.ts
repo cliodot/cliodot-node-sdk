@@ -14,6 +14,29 @@ import { parseApiErrorCode, parseApiErrorMessage } from "./parse-api-error";
 
 export type AuthHeadersResult = Record<string, string> | CliodotFail;
 
+export type SdkEnvironment = "dev" | "prod";
+
+export function normalizeSdkEnvironment(
+  value?: string
+): SdkEnvironment | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "dev" || normalized === "development") return "dev";
+  if (normalized === "prod" || normalized === "production") return "prod";
+  return undefined;
+}
+
+export function applyEnvironmentHeader(
+  headers: Record<string, string>,
+  environment?: string
+): Record<string, string> {
+  const normalized = normalizeSdkEnvironment(environment);
+  if (normalized) {
+    headers["x-environment"] = normalized;
+  }
+  return headers;
+}
+
 export type ExecuteCliodotRequestOptions<T extends object> = {
   configError?: CliodotStructuredError | null;
   authHeaders: AuthHeadersResult;
@@ -88,11 +111,13 @@ export function resolveBearerAuthHeaders(input: {
   appId: string;
   apiKey?: string;
   appSecret?: string;
+  environment?: string;
   missingMessage?: string;
 }): AuthHeadersResult {
   const headers: Record<string, string> = {
     "x-cliodot-app-id": input.appId,
   };
+  applyEnvironmentHeader(headers, input.environment);
   if (input.apiKey) {
     headers.Authorization = `Bearer ${input.apiKey}`;
     return headers;

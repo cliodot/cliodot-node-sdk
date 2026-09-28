@@ -104,6 +104,7 @@ const identity = new IdentityAppClient({
   baseUrl: process.env.CLIODOT_BASE_URL!,
   appId: "identity_payroll",
   apiKey: process.env.IDENTITY_APP_API_KEY!,
+  environment: "prod", // optional; omit to follow the project switch
 });
 
 await identity.authenticate({ target_app_id: "identity_hrms" });
@@ -122,6 +123,7 @@ const memory = new MemoryAppClient({
   baseUrl: process.env.CLIODOT_BASE_URL!,
   appId: process.env.MEMORY_APP_ID!,
   apiKey: process.env.MEMORY_APP_API_KEY!,
+  environment: "prod", // optional; omit to follow the project switch
 });
 
 await memory.store({

@@ -22,6 +22,7 @@ const events = new Events({
   baseUrl: "https://your-host",
   appId: process.env.EVENT_APP_ID!,
   apiKey: process.env.EVENT_APP_API_KEY!,
+  environment: "prod", // optional; omit to follow the project switch
 });
 ```
 
@@ -36,6 +37,8 @@ const events = new Events({
 ```
 
 `appApiKey` is accepted as an alias of `apiKey`.
+
+Optional constructor `environment` (`"dev"` \| `"prod"`) sends `x-environment` so connector auth templates resolve against that project env bag. Omit it to follow the project switch. This is separate from publish `environment`, which only routes **workflow** subscribers.
 
 ## Errors
 
@@ -73,7 +76,15 @@ const sub = await events.subscribe({
 await events.unsubscribe(sub.subscription_id);
 ```
 
-Creates an SDK-channel subscriber (no webhook URL). Durable webhook delivery is configured in the portal.
+Creates an SDK-channel subscriber bound to **this computer**. Calling `subscribe()` again on the same machine returns the same `subscription_id` (it updates the event list instead of duplicating). A different computer registers as a new instance and cannot listen to or delete the first computer's subscription.
+
+The instance id is derived automatically (`events.instanceId`). Override only for tests or hosts with unstable machine names:
+
+```ts
+new Events({ baseUrl, appId, apiKey, instanceId: "checkout-box-1" });
+```
+
+Durable webhook delivery is configured in the portal.
 
 ## Listen (SSE)
 
