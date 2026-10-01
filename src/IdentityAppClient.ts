@@ -1,5 +1,6 @@
-import axios, { AxiosInstance } from "axios";
+import { AxiosInstance } from "axios";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
+import { createCliodotAxios } from "./http/create-client";
 import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error";
 import { applyEnvironmentHeader } from "./http/cliodot-request";
 import type {
@@ -68,7 +69,7 @@ export class IdentityAppClient implements IdentityAppClientApi {
     this.appSecret = config.appSecret?.trim() || undefined;
     this.environment = config.environment;
     this.debug = config.debug ?? false;
-    this.axios = axios.create({
+    this.axios = createCliodotAxios({
       baseURL: `${this.baseUrl}/identity`,
       timeout: config.timeoutMs ?? 30000,
       headers: { "Content-Type": "application/json" },

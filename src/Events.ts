@@ -1,5 +1,6 @@
-import axios, { AxiosInstance } from "axios";
+import { AxiosInstance } from "axios";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
+import { createCliodotAxios } from "./http/create-client";
 import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error";
 import { applyEnvironmentHeader } from "./http/cliodot-request";
 import {
@@ -69,7 +70,7 @@ export class Events implements EventsApi {
       instanceId: config.instanceId,
     });
     this.debug = config.debug ?? false;
-    this.axios = axios.create({
+    this.axios = createCliodotAxios({
       baseURL: `${this.baseUrl}/event`,
       timeout: 30000,
       headers: { "Content-Type": "application/json" },

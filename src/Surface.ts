@@ -1,4 +1,5 @@
-import axios, { AxiosInstance } from "axios";
+import { AxiosInstance } from "axios";
+import { createCliodotAxios } from "./http/create-client";
 import crypto from "crypto";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
 import {
@@ -159,7 +160,7 @@ class SurfaceRuntime {
     this.invokeBaseUrl = this.slug
       ? `${this.rootBaseUrl}/${this.slug}`
       : this.rootBaseUrl;
-    this.axios = axios.create({
+    this.axios = createCliodotAxios({
       timeout: 60000,
       validateStatus: () => true,
     });

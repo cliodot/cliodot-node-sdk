@@ -63,6 +63,22 @@ export type CommercialCreateCustomerInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type CommercialUpdateCustomerInput = {
+  name?: string;
+  email?: string | null;
+  preferred_currency?: string | null;
+  tax_ids?: Array<{ type: string; value: string }>;
+  billing_address?: {
+    country: string;
+    region?: string;
+    city?: string;
+    line1?: string;
+    postal_code?: string;
+  } | null;
+  metadata?: Record<string, unknown> | null;
+  status?: string;
+};
+
 export type CommercialFeature = {
   _id: string;
   tenant_id: string;
@@ -856,6 +872,355 @@ export type CommercialAnalyticsParams = {
   limit?: number;
 };
 
+/** Common settle_in presets (ledger also accepts raw strings like `T+0`, `1d`, `24h`). */
+export const CommercialLedgerSettleIn = {
+  T0: "T+0",
+  T1: "T+1",
+  T2: "T+2",
+} as const;
+export type CommercialLedgerSettleIn =
+  (typeof CommercialLedgerSettleIn)[keyof typeof CommercialLedgerSettleIn];
+
+export const CommercialAnalyticsPeriod = {
+  H24: "24h",
+  D7: "7d",
+  D30: "30d",
+  D90: "90d",
+  Y1: "1y",
+  Custom: "custom",
+} as const;
+export type CommercialAnalyticsPeriod =
+  (typeof CommercialAnalyticsPeriod)[keyof typeof CommercialAnalyticsPeriod];
+
+export const CommercialAnalyticsGranularity = {
+  Hour: "hour",
+  Day: "day",
+  Week: "week",
+  Month: "month",
+} as const;
+export type CommercialAnalyticsGranularity =
+  (typeof CommercialAnalyticsGranularity)[keyof typeof CommercialAnalyticsGranularity];
+
+export const CommercialLedgerTransactionType = {
+  Credit: "credit",
+  Debit: "debit",
+  Transfer: "transfer",
+  Reversal: "reversal",
+  Hold: "hold",
+  HoldRelease: "hold_release",
+  HoldCapture: "hold_capture",
+  Exchange: "exchange",
+} as const;
+export type CommercialLedgerTransactionType =
+  (typeof CommercialLedgerTransactionType)[keyof typeof CommercialLedgerTransactionType];
+
+export type CommercialLedgerFeeCollectorInput =
+  | string
+  | { customer: string; key?: string };
+
+export type CommercialLedgerFeeRule = {
+  type: "percent" | "flat" | "percent_plus_flat" | string;
+  percent_bps?: number;
+  flat?: number;
+  min?: number;
+  max?: number;
+  mode?: "on_top" | "inclusive" | string;
+  collector?: CommercialLedgerFeeCollectorInput;
+  collector_wallet_id?: string;
+  reason?: string;
+};
+
+export type CommercialLedgerFeePolicy = {
+  credit?: CommercialLedgerFeeRule | null;
+  debit?: CommercialLedgerFeeRule | null;
+  transfer?: CommercialLedgerFeeRule | null;
+  collector?: CommercialLedgerFeeCollectorInput;
+  collector_wallet_id?: string;
+};
+
+export type CommercialLedgerFeeOverride =
+  | false
+  | {
+      amount: number;
+      mode?: "on_top" | "inclusive" | string;
+      reason?: string;
+      collector?: CommercialLedgerFeeCollectorInput;
+    };
+
+export type CommercialLedgerSettlementPolicy = {
+  settle_in?: string;
+};
+
+export type CommercialLedgerUnitInput =
+  | string
+  | {
+      unit: string;
+      metadata?: Record<string, unknown>;
+      settlement?: CommercialLedgerSettlementPolicy;
+      fees?: CommercialLedgerFeePolicy | null;
+    };
+
+export type CommercialWallet = {
+  _id: string;
+  tenant_id?: string;
+  app_id?: string;
+  customer_id: string;
+  key: string;
+  name?: string;
+  status: string;
+  units?: Array<{
+    unit: string;
+    metadata?: Record<string, unknown>;
+    settlement?: CommercialLedgerSettlementPolicy;
+    fees?: CommercialLedgerFeePolicy | null;
+  }>;
+  metadata?: Record<string, unknown>;
+  settlement?: CommercialLedgerSettlementPolicy;
+  fees?: CommercialLedgerFeePolicy | null;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  [key: string]: unknown;
+};
+
+export type CommercialWalletAccount = {
+  _id: string;
+  tenant_id?: string;
+  app_id?: string;
+  customer_id: string;
+  wallet_id: string;
+  unit: string;
+  available: number;
+  held: number;
+  unsettled: number;
+  total?: number;
+  version?: number;
+  metadata?: Record<string, unknown>;
+  settlement?: CommercialLedgerSettlementPolicy;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  [key: string]: unknown;
+};
+
+export type CommercialWalletEntry = {
+  _id: string;
+  customer_id?: string;
+  wallet_id?: string;
+  account_id?: string;
+  transaction_id?: string;
+  type: string;
+  unit: string;
+  amount: number;
+  balance_after?: number;
+  available_after?: number;
+  held_after?: number;
+  unsettled_after?: number;
+  reference?: string;
+  reason?: string;
+  invoice_id?: string;
+  fee_id?: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  [key: string]: unknown;
+};
+
+export type CommercialWalletTransactionFee = {
+  amount: number;
+  mode?: string;
+  charged_to?: string;
+  resolution?: string;
+  source?: string;
+  operation?: string;
+  fee_entry_id?: string;
+  collector_wallet_id?: string;
+  collector_account_id?: string;
+  collector_entry_id?: string;
+  collector_transaction_id?: string;
+};
+
+export type CommercialWalletTransaction = {
+  _id: string;
+  type: string;
+  status: string;
+  origin?: string;
+  unit: string;
+  amount: number;
+  source_wallet_id?: string;
+  source_account_id?: string;
+  dest_wallet_id?: string;
+  dest_account_id?: string;
+  reference?: string;
+  reverses_id?: string;
+  reversed_by_id?: string;
+  rate?: string;
+  from_unit?: string;
+  from_amount?: number;
+  to_unit?: string;
+  to_amount?: number;
+  quoted_at?: string | Date;
+  settle_at?: string | Date;
+  settled_at?: string | Date;
+  voided_at?: string | Date;
+  gross_amount?: number;
+  fee_amount?: number;
+  net_amount?: number;
+  fee_id?: string;
+  fee?: CommercialWalletTransactionFee;
+  metadata?: Record<string, unknown>;
+  entries?: CommercialWalletEntry[];
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  [key: string]: unknown;
+};
+
+export type CommercialWalletHold = {
+  _id: string;
+  wallet_id: string;
+  account_id?: string;
+  customer_id?: string;
+  unit: string;
+  amount: number;
+  reason: string;
+  status: string;
+  reference?: string;
+  hold_transaction_id?: string;
+  terminal_transaction_id?: string;
+  captured_at?: string | Date;
+  released_at?: string | Date;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  [key: string]: unknown;
+};
+
+export type CommercialWalletUnit = {
+  _id: string;
+  code: string;
+  name: string;
+  precision: number;
+  kind?: string;
+  settlement?: CommercialLedgerSettlementPolicy;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  [key: string]: unknown;
+};
+
+export type CommercialListWalletsResponse = {
+  ok: true;
+  wallets: CommercialWallet[];
+  pagination: CommercialPaginationMeta;
+};
+
+export type CommercialCreateWalletInput = {
+  key?: string;
+  name?: string;
+  metadata?: Record<string, unknown>;
+  units?: CommercialLedgerUnitInput[];
+  settlement?: CommercialLedgerSettlementPolicy;
+  fees?: CommercialLedgerFeePolicy | null;
+};
+
+export type CommercialUpdateWalletInput = {
+  name?: string | null;
+  metadata?: Record<string, unknown> | null;
+  units?: CommercialLedgerUnitInput[];
+  settlement?: CommercialLedgerSettlementPolicy | null;
+  fees?: CommercialLedgerFeePolicy | null;
+};
+
+export type CommercialOpenAccountInput = {
+  unit: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialUpdateAccountInput = {
+  metadata?: Record<string, unknown> | null;
+  settlement?: CommercialLedgerSettlementPolicy | null;
+};
+
+export type CommercialGetAccountOptions = {
+  customerId?: string;
+  walletId?: string;
+};
+
+export type CommercialListTransactionsParams = CommercialListParams & {
+  status?: string;
+  settle_at_from?: string;
+  settle_at_to?: string;
+  amount?: number;
+  unit?: string;
+  currency?: string;
+  reference?: string;
+};
+
+export type CommercialListHoldsParams = CommercialListParams & {
+  status?: string;
+};
+
+export type CommercialLedgerAmountInput = {
+  unit: string;
+  amount: number;
+  reference: string;
+  reason?: string;
+  invoice_id?: string;
+  settle_in?: string;
+  settle_at?: string;
+  fee?: CommercialLedgerFeeOverride;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialTransferInput = {
+  to: string | { customer: string; key?: string };
+  unit: string;
+  amount: number;
+  reference?: string;
+  settle_in?: string;
+  settle_at?: string;
+  fee?: CommercialLedgerFeeOverride;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialHoldInput = {
+  unit: string;
+  amount: number;
+  reason: string;
+  reference?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialCreateUnitInput = {
+  code: string;
+  name: string;
+  precision: number;
+  settlement?: CommercialLedgerSettlementPolicy;
+};
+
+export type CommercialExchangeInput = {
+  from: { unit: string; amount: number };
+  to: { unit: string; amount?: number };
+  rate: string;
+  reference?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CommercialLedgerAnalyticsParams = {
+  period?: string;
+  from?: string;
+  to?: string;
+  granularity?: string;
+  unit?: string;
+  units?: string[] | string;
+  customer_ids?: string[] | string;
+  customer_keys?: string[] | string;
+  wallet_id?: string;
+  wallet_key?: string;
+  types?: string[] | string;
+  include_charts?: boolean;
+  include_tables?: boolean;
+  include_insights?: boolean;
+  include_all_time?: boolean;
+  limit?: number;
+};
+
 export type CommercialAppClientApi = {
   check(input: CommercialCheckInput): Promise<CommercialCheckResult>;
   consume(input: CommercialConsumeInput): Promise<CommercialConsumeResult>;
@@ -871,6 +1236,10 @@ export type CommercialAppClientApi = {
   createCustomer(
     input: CommercialCreateCustomerInput
   ): Promise<{ ok: true; customer: CommercialCustomer }>;
+  updateCustomer(
+    customerId: string,
+    input: CommercialUpdateCustomerInput
+  ): Promise<{ ok: true; customer: CommercialCustomer }>;
   listCredits(
     customerId: string,
     params?: CommercialListCreditsParams
@@ -878,6 +1247,141 @@ export type CommercialAppClientApi = {
   topupCredits(
     input: CommercialCreditsTopupInput
   ): Promise<{ ok: true; invoice: CommercialInvoice }>;
+  listWallets(
+    customerId: string,
+    params?: CommercialListParams
+  ): Promise<CommercialListWalletsResponse>;
+  createWallet(
+    customerId: string,
+    input?: CommercialCreateWalletInput
+  ): Promise<{
+    ok: true;
+    wallet: CommercialWallet;
+    accounts?: CommercialWalletAccount[];
+  }>;
+  updateWallet(
+    customerId: string,
+    walletId: string,
+    input: CommercialUpdateWalletInput
+  ): Promise<{
+    ok: true;
+    wallet: CommercialWallet;
+    accounts?: CommercialWalletAccount[];
+  }>;
+  getWallet(
+    customerId: string,
+    walletId: string
+  ): Promise<{
+    ok: true;
+    wallet: CommercialWallet;
+    accounts?: CommercialWalletAccount[];
+  }>;
+  listAccounts(
+    customerId: string,
+    walletId: string
+  ): Promise<{ ok: true; accounts: CommercialWalletAccount[] }>;
+  openAccount(
+    customerId: string,
+    walletId: string,
+    input: CommercialOpenAccountInput
+  ): Promise<{ ok: true; account: CommercialWalletAccount }>;
+  updateAccount(
+    customerId: string,
+    walletId: string,
+    accountId: string,
+    input: CommercialUpdateAccountInput
+  ): Promise<{ ok: true; account: CommercialWalletAccount }>;
+  getAccount(
+    accountId: string,
+    options?: CommercialGetAccountOptions
+  ): Promise<{ ok: true; account: CommercialWalletAccount }>;
+  listEntries(
+    customerId: string,
+    walletId: string,
+    params?: CommercialListParams
+  ): Promise<{
+    ok: true;
+    entries: CommercialWalletEntry[];
+    pagination: CommercialPaginationMeta;
+  }>;
+  listTransactions(
+    customerId: string,
+    walletId: string,
+    params?: CommercialListTransactionsParams
+  ): Promise<{
+    ok: true;
+    transactions: CommercialWalletTransaction[];
+    pagination: CommercialPaginationMeta;
+  }>;
+  getTransaction(transactionId: string): Promise<{
+    ok: true;
+    transaction: CommercialWalletTransaction;
+    [key: string]: unknown;
+  }>;
+  credit(
+    customerId: string,
+    walletId: string,
+    input: CommercialLedgerAmountInput
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  debit(
+    customerId: string,
+    walletId: string,
+    input: CommercialLedgerAmountInput
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  transfer(
+    customerId: string,
+    walletId: string,
+    input: CommercialTransferInput
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  reverseTransaction(
+    transactionId: string,
+    input?: { reference?: string }
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  settleTransaction(
+    transactionId: string
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  voidTransaction(
+    transactionId: string
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  listHolds(
+    customerId: string,
+    walletId: string,
+    params?: CommercialListHoldsParams
+  ): Promise<{
+    ok: true;
+    holds: CommercialWalletHold[];
+    pagination: CommercialPaginationMeta;
+  }>;
+  hold(
+    customerId: string,
+    walletId: string,
+    input: CommercialHoldInput
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  captureHold(
+    customerId: string,
+    walletId: string,
+    holdId: string,
+    input?: { reference?: string }
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  releaseHold(
+    customerId: string,
+    walletId: string,
+    holdId: string,
+    input?: { reference?: string }
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  listUnits(): Promise<{
+    ok: true;
+    units: CommercialWalletUnit[];
+    iso_without_catalog?: boolean;
+  }>;
+  createUnit(
+    input: CommercialCreateUnitInput
+  ): Promise<{ ok: true; unit: CommercialWalletUnit }>;
+  exchange(
+    customerId: string,
+    walletId: string,
+    input: CommercialExchangeInput
+  ): Promise<{ ok: true; [key: string]: unknown }>;
   listCards(
     customerId: string,
     params?: CommercialListCardsParams
@@ -1005,5 +1509,11 @@ export type CommercialAppClientApi = {
   analytics(params?: CommercialAnalyticsParams): Promise<{ ok: true; analytics: unknown }>;
   analyticsCharts(
     params?: CommercialAnalyticsParams
+  ): Promise<{ ok: true; [key: string]: unknown }>;
+  ledgerAnalytics(
+    params?: CommercialLedgerAnalyticsParams
+  ): Promise<{ ok: true; analytics: unknown }>;
+  ledgerAnalyticsCharts(
+    params?: CommercialLedgerAnalyticsParams
   ): Promise<{ ok: true; [key: string]: unknown }>;
 };

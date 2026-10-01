@@ -1,5 +1,6 @@
 import axios from "axios";
 import jwt from "jsonwebtoken";
+import { cliodotHttpAgents } from "../http/localhost-lookup";
 import { renderTemplate } from "../template";
 import { isTypedConnectorDef } from "../connectors/registry";
 import { jsonResponderConnector } from "../connectors/builtin";
@@ -182,7 +183,10 @@ async function executeRestConnector(
 
   let resp;
   try {
-    resp = await axios(cfg);
+    resp = await axios({
+      ...cfg,
+      ...cliodotHttpAgents(),
+    });
   } catch (e) {
     rethrowConnectorHttpError(e);
   }

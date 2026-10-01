@@ -1,9 +1,10 @@
-import axios, { AxiosInstance } from "axios";
+import { AxiosInstance } from "axios";
 import { IWorkflow } from "./types/workflow";
 import { IFunction } from "./types/function";
 import { stepsToNodes } from "./transformers/StepsToNodesTransformer";
 import type { ConnectorsApi, WorkflowsApi, FunctionsApi, ProjectsApi } from "./types/client.api";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
+import { createCliodotAxios } from "./http/create-client";
 import { sanitizeExecutionHeaders } from "./http/sanitize-execution-headers";
 
 export const DEFAULT_CLIODOT_BASE_URL = "https://sdk.flowfly.dev";
@@ -89,7 +90,7 @@ export class FlosyncClient {
     this.tokenRefreshMarginMs = config.tokenRefreshMarginMs ?? DEFAULT_TOKEN_REFRESH_MARGIN_MS;
     this.tokenFallbackReuseMs = config.tokenFallbackReuseMs ?? DEFAULT_FALLBACK_REUSE_MS;
     this.debug = config.debug ?? false;
-    this.axios = axios.create({
+    this.axios = createCliodotAxios({
       baseURL: `${this.baseUrl}/api-core/cliodot`,
       timeout: 30000,
       headers: { "Content-Type": "application/json" },

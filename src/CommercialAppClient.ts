@@ -1,15 +1,18 @@
-import axios, { AxiosInstance } from "axios";
+import { AxiosInstance } from "axios";
 import { CliodotApiError, cliodotApiErrorFromAxios } from "./errors";
+import { createCliodotAxios } from "./http/create-client";
 import { parseApiErrorCode, parseApiErrorMessage } from "./http/parse-api-error";
 import { applyEnvironmentHeader } from "./http/cliodot-request";
 import type {
   CommercialAnalyticsParams,
+  CommercialLedgerAnalyticsParams,
   CommercialAppClientApi,
   CommercialAppClientConfig,
   CommercialChangePlanInput,
   CommercialConfirmPaymentInput,
   CommercialCheckInput,
   CommercialCreateCustomerInput,
+  CommercialUpdateCustomerInput,
   CommercialCreateSubscriptionInput,
   CommercialInitiatePaymentInput,
   CommercialInitiatePaymentResult,
@@ -49,6 +52,25 @@ import type {
   CommercialRenewSubscriptionResult,
   CommercialListCreditsParams,
   CommercialListCreditsResponse,
+  CommercialCreateWalletInput,
+  CommercialUpdateWalletInput,
+  CommercialOpenAccountInput,
+  CommercialUpdateAccountInput,
+  CommercialCreateUnitInput,
+  CommercialExchangeInput,
+  CommercialHoldInput,
+  CommercialLedgerAmountInput,
+  CommercialListHoldsParams,
+  CommercialListTransactionsParams,
+  CommercialGetAccountOptions,
+  CommercialListWalletsResponse,
+  CommercialTransferInput,
+  CommercialWallet,
+  CommercialWalletAccount,
+  CommercialWalletEntry,
+  CommercialWalletHold,
+  CommercialWalletTransaction,
+  CommercialWalletUnit,
   CommercialAddCardInput,
   CommercialCustomerCard,
   CommercialListCardsParams,
@@ -135,7 +157,7 @@ export class CommercialAppClient implements CommercialAppClientApi {
     this.appSecret = config.appSecret?.trim() || undefined;
     this.environment = config.environment;
     this.debug = config.debug ?? false;
-    this.axios = axios.create({
+    this.axios = createCliodotAxios({
       baseURL: `${this.baseUrl}/commercial`,
       timeout: 60000,
       headers: { "Content-Type": "application/json" },
@@ -254,6 +276,381 @@ export class CommercialAppClient implements CommercialAppClientApi {
     );
   }
 
+  listWallets(
+    customerId: string,
+    params?: CommercialListParams
+  ): Promise<CommercialListWalletsResponse> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets`,
+      { params: cleanParams(params as Record<string, unknown>) }
+    );
+  }
+
+  createWallet(
+    customerId: string,
+    input: CommercialCreateWalletInput = {}
+  ): Promise<{
+    ok: true;
+    wallet: CommercialWallet;
+    accounts?: CommercialWalletAccount[];
+  }> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  updateWallet(
+    customerId: string,
+    walletId: string,
+    input: CommercialUpdateWalletInput
+  ): Promise<{
+    ok: true;
+    wallet: CommercialWallet;
+    accounts?: CommercialWalletAccount[];
+  }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "PATCH",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  getWallet(
+    customerId: string,
+    walletId: string
+  ): Promise<{
+    ok: true;
+    wallet: CommercialWallet;
+    accounts?: CommercialWalletAccount[];
+  }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}`
+    );
+  }
+
+  listAccounts(
+    customerId: string,
+    walletId: string
+  ): Promise<{ ok: true; accounts: CommercialWalletAccount[] }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/accounts`
+    );
+  }
+
+  openAccount(
+    customerId: string,
+    walletId: string,
+    input: CommercialOpenAccountInput
+  ): Promise<{ ok: true; account: CommercialWalletAccount }> {
+    if (!customerId?.trim() || !walletId?.trim() || !input?.unit?.trim()) {
+      throw new CliodotApiError("customerId, walletId, and unit are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/accounts`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  updateAccount(
+    customerId: string,
+    walletId: string,
+    accountId: string,
+    input: CommercialUpdateAccountInput
+  ): Promise<{ ok: true; account: CommercialWalletAccount }> {
+    if (!customerId?.trim() || !walletId?.trim() || !accountId?.trim()) {
+      throw new CliodotApiError("customerId, walletId, and accountId are required");
+    }
+    return this.request(
+      "PATCH",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/accounts/${encodeURIComponent(accountId.trim())}`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  getAccount(
+    accountId: string,
+    options?: CommercialGetAccountOptions
+  ): Promise<{ ok: true; account: CommercialWalletAccount }> {
+    if (!accountId?.trim()) {
+      throw new CliodotApiError("accountId is required");
+    }
+    const customerId = options?.customerId?.trim();
+    const walletId = options?.walletId?.trim();
+    if (customerId && walletId) {
+      return this.request(
+        "GET",
+        `/v1/customers/${encodeURIComponent(customerId)}/wallets/${encodeURIComponent(walletId)}/accounts/${encodeURIComponent(accountId.trim())}`
+      );
+    }
+    return this.request("GET", `/v1/accounts/${encodeURIComponent(accountId.trim())}`, {
+      params: {
+        customer_id: customerId || undefined,
+        wallet_id: walletId || undefined,
+      },
+    });
+  }
+
+  listEntries(
+    customerId: string,
+    walletId: string,
+    params?: CommercialListParams
+  ): Promise<{
+    ok: true;
+    entries: CommercialWalletEntry[];
+    pagination: CommercialPaginationMeta;
+  }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/entries`,
+      { params: cleanParams(params as Record<string, unknown>) }
+    );
+  }
+
+  listTransactions(
+    customerId: string,
+    walletId: string,
+    params?: CommercialListTransactionsParams
+  ): Promise<{
+    ok: true;
+    transactions: CommercialWalletTransaction[];
+    pagination: CommercialPaginationMeta;
+  }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/transactions`,
+      { params: cleanParams(params as Record<string, unknown>) }
+    );
+  }
+
+  getTransaction(transactionId: string): Promise<{
+    ok: true;
+    transaction: CommercialWalletTransaction;
+    [key: string]: unknown;
+  }> {
+    if (!transactionId?.trim()) {
+      throw new CliodotApiError("transactionId is required");
+    }
+    return this.request(
+      "GET",
+      `/v1/transactions/${encodeURIComponent(transactionId.trim())}`
+    );
+  }
+
+  credit(
+    customerId: string,
+    walletId: string,
+    input: CommercialLedgerAmountInput
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/credit`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  debit(
+    customerId: string,
+    walletId: string,
+    input: CommercialLedgerAmountInput
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/debit`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  transfer(
+    customerId: string,
+    walletId: string,
+    input: CommercialTransferInput
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/transfer`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  reverseTransaction(
+    transactionId: string,
+    input: { reference?: string } = {}
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!transactionId?.trim()) {
+      throw new CliodotApiError("transactionId is required");
+    }
+    return this.request(
+      "POST",
+      `/v1/transactions/${encodeURIComponent(transactionId.trim())}/reverse`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  settleTransaction(
+    transactionId: string
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!transactionId?.trim()) {
+      throw new CliodotApiError("transactionId is required");
+    }
+    return this.request(
+      "POST",
+      `/v1/transactions/${encodeURIComponent(transactionId.trim())}/settle`
+    );
+  }
+
+  voidTransaction(
+    transactionId: string
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!transactionId?.trim()) {
+      throw new CliodotApiError("transactionId is required");
+    }
+    return this.request(
+      "POST",
+      `/v1/transactions/${encodeURIComponent(transactionId.trim())}/void`
+    );
+  }
+
+  listHolds(
+    customerId: string,
+    walletId: string,
+    params?: CommercialListHoldsParams
+  ): Promise<{
+    ok: true;
+    holds: CommercialWalletHold[];
+    pagination: CommercialPaginationMeta;
+  }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "GET",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/holds`,
+      { params: cleanParams(params as Record<string, unknown>) }
+    );
+  }
+
+  hold(
+    customerId: string,
+    walletId: string,
+    input: CommercialHoldInput
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/holds`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  captureHold(
+    customerId: string,
+    walletId: string,
+    holdId: string,
+    input: { reference?: string } = {}
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!customerId?.trim() || !walletId?.trim() || !holdId?.trim()) {
+      throw new CliodotApiError("customerId, walletId, and holdId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/holds/${encodeURIComponent(holdId.trim())}/capture`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  releaseHold(
+    customerId: string,
+    walletId: string,
+    holdId: string,
+    input: { reference?: string } = {}
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!customerId?.trim() || !walletId?.trim() || !holdId?.trim()) {
+      throw new CliodotApiError("customerId, walletId, and holdId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/holds/${encodeURIComponent(holdId.trim())}/release`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
+  listUnits(): Promise<{
+    ok: true;
+    units: CommercialWalletUnit[];
+    iso_without_catalog?: boolean;
+  }> {
+    return this.request("GET", "/v1/units");
+  }
+
+  createUnit(
+    input: CommercialCreateUnitInput
+  ): Promise<{ ok: true; unit: CommercialWalletUnit }> {
+    if (!input?.code?.trim() || !input?.name?.trim()) {
+      throw new CliodotApiError("code and name are required");
+    }
+    return this.request("POST", "/v1/units", {
+      body: {
+        code: input.code.trim(),
+        name: input.name.trim(),
+        precision: input.precision,
+        settlement: input.settlement,
+      },
+    });
+  }
+
+  exchange(
+    customerId: string,
+    walletId: string,
+    input: CommercialExchangeInput
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    if (!customerId?.trim() || !walletId?.trim()) {
+      throw new CliodotApiError("customerId and walletId are required");
+    }
+    return this.request(
+      "POST",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}/wallets/${encodeURIComponent(walletId.trim())}/exchange`,
+      { body: input as Record<string, unknown> }
+    );
+  }
+
   listCards(
     customerId: string,
     params?: CommercialListCardsParams
@@ -340,6 +737,20 @@ export class CommercialAppClient implements CommercialAppClientApi {
         metadata: input.metadata,
       },
     });
+  }
+
+  updateCustomer(
+    customerId: string,
+    input: CommercialUpdateCustomerInput
+  ): Promise<{ ok: true; customer: CommercialCustomer }> {
+    if (!customerId?.trim()) {
+      throw new CliodotApiError("customerId is required");
+    }
+    return this.request(
+      "PATCH",
+      `/v1/customers/${encodeURIComponent(customerId.trim())}`,
+      { body: input as Record<string, unknown> }
+    );
   }
 
   listFeatures(
@@ -837,6 +1248,22 @@ export class CommercialAppClient implements CommercialAppClientApi {
     params?: CommercialAnalyticsParams
   ): Promise<{ ok: true; [key: string]: unknown }> {
     return this.request("GET", "/v1/analytics/charts", {
+      params: cleanParams(params as Record<string, unknown>),
+    });
+  }
+
+  ledgerAnalytics(
+    params?: CommercialLedgerAnalyticsParams
+  ): Promise<{ ok: true; analytics: unknown }> {
+    return this.request("GET", "/v1/ledger/analytics", {
+      params: cleanParams(params as Record<string, unknown>),
+    });
+  }
+
+  ledgerAnalyticsCharts(
+    params?: CommercialLedgerAnalyticsParams
+  ): Promise<{ ok: true; [key: string]: unknown }> {
+    return this.request("GET", "/v1/ledger/analytics/charts", {
       params: cleanParams(params as Record<string, unknown>),
     });
   }
