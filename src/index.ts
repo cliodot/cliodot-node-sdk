@@ -41,6 +41,24 @@ export { MemoryAppClient } from "./MemoryAppClient";
 export { MemoryClient } from "./MemoryClient";
 export { IdentityAppClient } from "./IdentityAppClient";
 export { CommercialAppClient } from "./CommercialAppClient";
+export { ProviderServicesClient } from "./ProviderServicesClient";
+export type {
+  ProviderServicesClientConfig,
+  ProviderExecuteOptions,
+  ProviderExecuteInput,
+  ProviderExecuteError,
+  ProviderExecuteAttempt,
+  ProviderExecuteResult,
+  ProviderExecuteResponse,
+  ProviderCatalogPublicError,
+  ProviderCatalogPublicOperation,
+  ProviderCatalogPublicService,
+  ProviderCatalogResponse,
+  ProviderCatalogMethodResult,
+  ProviderSdkTypesArtifact,
+  ProviderSdkTypesResponse,
+  ProviderSdkTypesMethodResult,
+} from "./types/provider-services.api";
 export {
   verifyIdentityTokenOffline,
   clearIdentityJwksCache,
